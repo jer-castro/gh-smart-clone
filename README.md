@@ -2,26 +2,109 @@
 
 [![test](https://github.com/tmchow/gh-smart-clone/actions/workflows/test.yml/badge.svg)](https://github.com/tmchow/gh-smart-clone/actions/workflows/test.yml)
 
-`gh-smart-clone` is a GitHub CLI extension that clones repositories into a
-predictable `owner/repo` directory layout, with explicit modes for first-party
-work, external OSS inspection, and OSS contribution forks.
+<p align="center">
+  <img src="assets/gh-smart-clone-header.png" alt="gh-smart-clone" width="800">
+</p>
+
+`gh-smart-clone` is a GitHub CLI extension that encodes a canonical local
+workspace layout for GitHub repositories. Paths answer project identity and
+workspace relationship; remotes and optional local git identity answer push,
+pull, and authorship. Humans and AI agents can read those facts from the
+checkout without reconstructing them from memory. An [agent skill](#agent-skill)
+ships with the repo so agents know when to use each mode.
+
+**Before** — common layouts after cloning with `git clone`, `gh repo clone`, or
+an owner/repo wrapper. Destinations are tidy, but they do not say what kind of
+work each checkout is:
 
 ```text
-tmchow/foo                         -> ~/Code/tmchow/foo
-EveryInc/compound-engineering-plugin -> ~/Code/EveryInc/compound-engineering-plugin
-tmchow/orca, fork of stablyai/orca -> ~/Code/stablyai/orca
-tmchow/orca with --oss             -> ~/Code/oss/stablyai/orca
---contribute anthropics/claude-code -> ~/Code/oss/anthropics/claude-code
---group illo tmchow/illo-website   -> ~/Code/tmchow/illo/illo-website
+~/Code/
+├── you/
+│   ├── notes/
+│   ├── widgets/            # your fork of acme/widgets — path says "you"
+│   ├── illo-website/       # related repos scattered flat under the owner
+│   ├── illo-skill/
+│   └── illo-characters/
+└── contoso/
+    └── cli/                # contribution checkout mixed with first-party work
 ```
 
-For forks, the clone source stays as the repository you requested. That means
-your fork remains `origin`, while `gh repo clone` can still configure the parent
-repository as `upstream`.
+**After** — the same repos with `gh smart-clone` (normal, `--oss`,
+`--contribute`, and `--group`):
 
-Contribution mode is different: `--contribute OWNER/REPO` treats `OWNER/REPO`
-as the upstream project, creates or reuses your fork explicitly, clones the fork
-as `origin`, and configures `upstream` to the original repository.
+```text
+~/Code/
+├── you/
+│   ├── notes/              # first-party
+│   └── illo/               # --group illo (one logical multi-repo workspace)
+│       ├── illo-website/
+│       ├── illo-skill/
+│       └── illo-characters/
+├── acme/
+│   └── widgets/            # fork lives under upstream project identity
+│                           # origin -> you/widgets
+└── oss/
+    ├── acme/
+    │   └── widgets/        # --oss: external inspection of the same project
+    └── contoso/
+        └── cli/            # --contribute: origin=fork, upstream=contoso/cli
+```
+
+What changed: project identity stays in `owner/repo`, first-party vs external
+work is a root (`oss/`), related repos share a group folder, and fork ownership
+stays on the remotes—not the path.
+
+## Why this exists
+
+`gh repo clone` already clones well and sets up fork remotes. Tools like
+[`ghq`](https://github.com/x-motemen/ghq) already give deterministic
+`host/owner/repo` layouts. Owner/repo wrappers already avoid dumping clones into
+the current directory.
+
+The gap is workspace semantics: the local tree should encode what kind of work a
+checkout is, not only where the bytes live. That matters for day-to-day
+navigation and even more for AI agents, which otherwise confuse project
+identity, fork ownership, and write authority.
+
+For forks, the clone source stays as the repository you requested: your fork
+remains `origin`, while `gh repo clone` can still configure the parent as
+`upstream`. Contribution mode (`--contribute`) is different: it treats the
+input as the upstream project, creates or reuses your fork, clones the fork as
+`origin`, and configures `upstream` to the original repository.
+
+## Mental model
+
+Five concerns are kept separate on purpose:
+
+| Concern | Encoded by | Answers |
+| --- | --- | --- |
+| Project identity | `owner/repo` path segment (upstream by default for forks) | What canonical project is this? |
+| Workspace relationship | Main prefix vs `oss/` | First-party/maintained work, or external OSS? |
+| Fork ownership | Remotes (`origin` / `upstream`), not the path | Where do pushes and upstream pulls go? |
+| Logical multi-repo workspace | `--group` parent directory | Which related repos form one working surface? |
+| Git identity | Optional local `user.name` / `user.email` in contribution mode | Which author should commits use here? |
+
+Fork owner is a push mechanism, not project identity. The `oss/` root is a
+workflow boundary, not merely a tidy folder name. `--group` defines a shared
+parent directory that humans and agents can treat as one logical project root
+across multiple repositories; it does not change remotes, fork ownership, or
+local git identity.
+
+## How this differs from existing tools
+
+| Tool | What it does well | What it does not encode |
+| --- | --- | --- |
+| `git clone` | Lowest-level clone control | Destination taxonomy, fork/upstream workflow, workspace modes |
+| `gh repo clone` | GitHub auth, clone UX, fork remotes (`origin` / `upstream`) | Local path meaning: first-party vs external, upstream project placement, contribution setup |
+| [`ghq`](https://github.com/x-motemen/ghq) | Deterministic `host/owner/repo` layout across hosts | GitHub-specific workspace relationship, contribution fork placement, multi-repo group roots, contribution identity |
+| Owner/repo clone wrappers | Simple namespaced destinations under an owner | Distinction between inspection and contribution, explicit fork creation, upstream-path contribution checkouts |
+
+`gh-smart-clone` is not a replacement for those tools. It sits on `gh repo clone`
+for cloning and remotes, prefers a GitHub-only `owner/repo` layout (no host
+segment), and adds the semantics those tools intentionally leave open: when
+work is external, when a fork may be created, where a contribution checkout
+lives, how related repos share a workspace root, and optional local identity
+for contribution work.
 
 ## Installation
 
@@ -45,8 +128,9 @@ gh extension install .
 ## Agent Skill
 
 This repository also publishes an agent skill at
-`skills/gh-smart-clone/SKILL.md`. The skill teaches agents when to use normal
-clone mode, `--oss` inspection mode, and `--contribute` fork setup mode.
+`skills/gh-smart-clone/SKILL.md`. Use it so agents default to `gh smart-clone`
+and choose correctly among normal mode, `--oss` inspection, and `--contribute`
+fork setup—instead of falling back to raw `git clone` / `gh repo clone`.
 
 Install the skill for the current project:
 
@@ -97,15 +181,15 @@ npx skills use tmchow/gh-smart-clone@gh-smart-clone
 ## Usage
 
 ```sh
-gh smart-clone tmchow/foo
-gh smart-clone EveryInc/compound-engineering-plugin
-gh smart-clone tmchow/orca
+gh smart-clone you/notes
+gh smart-clone acme/widgets
+gh smart-clone you/widgets
 ```
 
 The default clone root is `~/Code`. Override it with `--prefix`:
 
 ```sh
-gh smart-clone --prefix ~/Developer tmchow/orca
+gh smart-clone --prefix ~/Developer you/widgets
 ```
 
 or with configuration:
@@ -117,38 +201,38 @@ git config --global smart-clone.prefix ~/Developer
 or with an environment variable:
 
 ```sh
-GH_SMART_CLONE_PREFIX=~/Developer gh smart-clone tmchow/orca
+GH_SMART_CLONE_PREFIX=~/Developer gh smart-clone you/widgets
 ```
 
 ### Grouping Related Repos
 
 Sometimes several repositories belong together even though GitHub stores them
-flat under one owner. Use `--group` to collect them under a shared
-organizational folder:
+flat under one owner. Use `--group` to place them under a shared parent
+directory that acts as a logical multi-repo workspace root—one place humans and
+AI agents can operate across related checkouts:
 
 ```sh
-gh smart-clone --group illo tmchow/illo-website
-gh smart-clone --group illo tmchow/illo-skill
-gh smart-clone --group illo tmchow/illo-characters
-# -> ~/Code/tmchow/illo/illo-website
-# -> ~/Code/tmchow/illo/illo-skill
-# -> ~/Code/tmchow/illo/illo-characters
+gh smart-clone --group illo you/illo-website
+gh smart-clone --group illo you/illo-skill
+gh smart-clone --group illo you/illo-characters
+# -> ~/Code/you/illo/illo-website
+# -> ~/Code/you/illo/illo-skill
+# -> ~/Code/you/illo/illo-characters
 ```
 
-The group is a cosmetic directory segment placed between owner and repo. The
-group folder is plain organization: it is never itself a git repository, and
-grouping never changes `origin`, `upstream`, fork ownership, or local git
-identity. Grouping is always explicit; a shared name prefix like `illo-` does
-not imply a group on its own.
+The group is a directory segment placed between owner and repo. It is never
+itself a git repository, and grouping never changes `origin`, `upstream`, fork
+ownership, or local git identity. Grouping is always explicit; a shared name
+prefix like `illo-` does not imply a group on its own.
 
 `--group` composes with every mode and accepts nested segments:
 
 ```sh
-gh smart-clone --oss --group vendor anthropics/claude-code
-# -> ~/Code/oss/anthropics/vendor/claude-code
+gh smart-clone --oss --group vendor contoso/cli
+# -> ~/Code/oss/contoso/vendor/cli
 
-gh smart-clone --group clients/acme acme/widgets
-# -> ~/Code/acme/clients/acme/widgets
+gh smart-clone --group clients/northwind northwind/invoices
+# -> ~/Code/northwind/clients/northwind/invoices
 ```
 
 ### OSS / External Repos
@@ -157,11 +241,11 @@ Use `--oss` when a checkout is external upstream work rather than first-party
 work:
 
 ```sh
-gh smart-clone --oss anthropics/claude-code
-# -> ~/Code/oss/anthropics/claude-code
+gh smart-clone --oss contoso/cli
+# -> ~/Code/oss/contoso/cli
 
-gh smart-clone --oss tmchow/orca
-# -> ~/Code/oss/stablyai/orca
+gh smart-clone --oss you/widgets
+# -> ~/Code/oss/acme/widgets
 ```
 
 The `owner/repo` part still answers "what canonical project is this?" The
@@ -172,7 +256,7 @@ OSS inspection and contribution checkouts.
 The default OSS root is `<resolved-prefix>/oss`. Override it with `--oss-prefix`:
 
 ```sh
-gh smart-clone --oss-prefix ~/src/external anthropics/claude-code
+gh smart-clone --oss-prefix ~/src/external contoso/cli
 ```
 
 or with configuration:
@@ -184,7 +268,7 @@ git config --global smart-clone.ossPrefix ~/src/external
 or with an environment variable:
 
 ```sh
-GH_SMART_CLONE_OSS_PREFIX=~/src/external gh smart-clone --oss anthropics/claude-code
+GH_SMART_CLONE_OSS_PREFIX=~/src/external gh smart-clone --oss contoso/cli
 ```
 
 `--oss-prefix` implies `--oss`. `--external` is an alias for `--oss`.
@@ -194,8 +278,8 @@ GH_SMART_CLONE_OSS_PREFIX=~/src/external gh smart-clone --oss anthropics/claude-
 Use `--contribute` when you intend to make changes through a fork:
 
 ```sh
-gh smart-clone --contribute anthropics/claude-code
-# -> ~/Code/oss/anthropics/claude-code
+gh smart-clone --contribute contoso/cli
+# -> ~/Code/oss/contoso/cli
 ```
 
 This mode may create external GitHub state. Normal clone mode and `--oss` never
@@ -224,7 +308,7 @@ git config --global smart-clone.sshAlias github.com-work
 Use a one-off fork owner:
 
 ```sh
-gh smart-clone --contribute --fork-owner OWNER_OR_ORG anthropics/claude-code
+gh smart-clone --contribute --fork-owner OWNER_OR_ORG contoso/cli
 ```
 
 If the fork owner differs from the authenticated `gh` user, `gh-smart-clone`
@@ -234,62 +318,46 @@ treats it as an organization fork target and passes `--org OWNER_OR_ORG` to
 Require the fork to already exist:
 
 ```sh
-gh smart-clone --contribute --no-fork anthropics/claude-code
+gh smart-clone --contribute --no-fork contoso/cli
 ```
 
 If a contribution checkout already exists, reconfigure it intentionally:
 
 ```sh
-gh smart-clone --contribute --reconfigure anthropics/claude-code
+gh smart-clone --contribute --reconfigure contoso/cli
 ```
 
 `--print-path` and `--dry-run` do not create forks:
 
 ```sh
-gh smart-clone --contribute --print-path anthropics/claude-code
-gh smart-clone --contribute --dry-run anthropics/claude-code
+gh smart-clone --contribute --print-path contoso/cli
+gh smart-clone --contribute --dry-run contoso/cli
 ```
 
 Preview the path without cloning:
 
 ```sh
-gh smart-clone --print-path tmchow/orca
-gh smart-clone --dry-run tmchow/orca
+gh smart-clone --print-path you/widgets
+gh smart-clone --dry-run you/widgets
 ```
 
 Use your fork owner instead of the upstream owner:
 
 ```sh
-gh smart-clone --fork-placement fork tmchow/orca
+gh smart-clone --fork-placement fork you/widgets
 ```
 
 Forward supported `gh repo clone` fork flags:
 
 ```sh
-gh smart-clone --upstream-remote-name parent tmchow/orca
-gh smart-clone --no-upstream tmchow/orca
+gh smart-clone --upstream-remote-name parent you/widgets
+gh smart-clone --no-upstream you/widgets
 ```
 
 Forward raw `git clone` flags after `--`:
 
 ```sh
-gh smart-clone tmchow/orca -- --depth=1
-```
-
-## Why
-
-`gh repo clone` is already good at cloning forks and setting up remotes. The
-missing piece is local filesystem taxonomy. For day-to-day navigation, a forked
-checkout is often easier to recognize by the project it contributes to:
-
-```text
-~/Code/stablyai/orca
-```
-
-even when the push remote is:
-
-```text
-origin -> github.com/tmchow/orca
+gh smart-clone you/widgets -- --depth=1
 ```
 
 ## Options
@@ -342,7 +410,7 @@ network access.
 
 ## Prior Art
 
-This extension was inspired by:
+This extension builds on ideas from:
 
 - [`spenserblack/gh-namespace-clone`](https://github.com/spenserblack/gh-namespace-clone),
   which wraps `gh repo clone` and namespaces destinations by repository owner.
@@ -353,8 +421,9 @@ This extension was inspired by:
   `host/owner/repo` layout helped clarify why a GitHub-only workflow may prefer
   omitting the host segment.
 
-`gh-smart-clone` takes the small next step of using GitHub repository metadata
-to place contribution forks under their upstream project identity.
+`gh-smart-clone` takes the next step of using GitHub repository metadata to
+encode workspace relationship and place contribution forks under their upstream
+project identity.
 
 ## License
 
