@@ -19,9 +19,9 @@ work each checkout is:
 
 ```text
 ~/Code/
-├── you/
+├── YOUR_USERNAME/
 │   ├── notes/
-│   ├── widgets/            # your fork of acme/widgets — path says "you"
+│   ├── widgets/            # your fork of acme/widgets — path says you own it
 │   ├── illo-website/       # related repos scattered flat under the owner
 │   ├── illo-skill/
 │   └── illo-characters/
@@ -29,12 +29,15 @@ work each checkout is:
     └── cli/                # contribution checkout mixed with first-party work
 ```
 
+`YOUR_USERNAME` stands for your own GitHub account; `acme` and `contoso` are
+other people's.
+
 **After** — the same repos with `gh smart-clone` (normal, `--oss`,
 `--contribute`, and `--group`):
 
 ```text
 ~/Code/
-├── you/
+├── YOUR_USERNAME/
 │   ├── notes/              # first-party
 │   └── illo/               # --group illo (one logical multi-repo workspace)
 │       ├── illo-website/
@@ -42,7 +45,7 @@ work each checkout is:
 │       └── illo-characters/
 ├── acme/
 │   └── widgets/            # fork lives under upstream project identity
-│                           # origin -> you/widgets
+│                           # origin -> YOUR_USERNAME/widgets
 └── oss/
     ├── acme/
     │   └── widgets/        # --oss: external inspection of the same project
@@ -132,23 +135,25 @@ This repository also publishes an agent skill at
 and choose correctly among normal mode, `--oss` inspection, and `--contribute`
 fork setup—instead of falling back to raw `git clone` / `gh repo clone`.
 
-Install the skill for the current project:
-
-```sh
-npx skills add tmchow/gh-smart-clone --skill gh-smart-clone
-```
-
-Install it globally:
+Install it globally (recommended):
 
 ```sh
 npx skills add tmchow/gh-smart-clone --skill gh-smart-clone --global
 ```
 
+Cloning happens outside any one repo, so the skill is only useful if it is
+available everywhere. Project-only installs are supported but not recommended:
+the skill will be missing exactly when you clone from somewhere else.
+
+```sh
+npx skills add tmchow/gh-smart-clone --skill gh-smart-clone
+```
+
 Install it for a specific agent:
 
 ```sh
-npx skills add tmchow/gh-smart-clone --skill gh-smart-clone --agent codex
-npx skills add tmchow/gh-smart-clone --skill gh-smart-clone --agent claude-code
+npx skills add tmchow/gh-smart-clone --skill gh-smart-clone --global --agent codex
+npx skills add tmchow/gh-smart-clone --skill gh-smart-clone --global --agent claude-code
 ```
 
 List installed skills:
@@ -181,15 +186,15 @@ npx skills use tmchow/gh-smart-clone@gh-smart-clone
 ## Usage
 
 ```sh
-gh smart-clone you/notes
+gh smart-clone YOUR_USERNAME/notes
 gh smart-clone acme/widgets
-gh smart-clone you/widgets
+gh smart-clone YOUR_USERNAME/widgets
 ```
 
 The default clone root is `~/Code`. Override it with `--prefix`:
 
 ```sh
-gh smart-clone --prefix ~/Developer you/widgets
+gh smart-clone --prefix ~/Developer YOUR_USERNAME/widgets
 ```
 
 or with configuration:
@@ -201,7 +206,7 @@ git config --global smart-clone.prefix ~/Developer
 or with an environment variable:
 
 ```sh
-GH_SMART_CLONE_PREFIX=~/Developer gh smart-clone you/widgets
+GH_SMART_CLONE_PREFIX=~/Developer gh smart-clone YOUR_USERNAME/widgets
 ```
 
 ### Grouping Related Repos
@@ -212,12 +217,12 @@ directory that acts as a logical multi-repo workspace root—one place humans an
 AI agents can operate across related checkouts:
 
 ```sh
-gh smart-clone --group illo you/illo-website
-gh smart-clone --group illo you/illo-skill
-gh smart-clone --group illo you/illo-characters
-# -> ~/Code/you/illo/illo-website
-# -> ~/Code/you/illo/illo-skill
-# -> ~/Code/you/illo/illo-characters
+gh smart-clone --group illo YOUR_USERNAME/illo-website
+gh smart-clone --group illo YOUR_USERNAME/illo-skill
+gh smart-clone --group illo YOUR_USERNAME/illo-characters
+# -> ~/Code/YOUR_USERNAME/illo/illo-website
+# -> ~/Code/YOUR_USERNAME/illo/illo-skill
+# -> ~/Code/YOUR_USERNAME/illo/illo-characters
 ```
 
 The group is a directory segment placed between owner and repo. It is never
@@ -244,7 +249,7 @@ work:
 gh smart-clone --oss contoso/cli
 # -> ~/Code/oss/contoso/cli
 
-gh smart-clone --oss you/widgets
+gh smart-clone --oss YOUR_USERNAME/widgets
 # -> ~/Code/oss/acme/widgets
 ```
 
@@ -337,27 +342,27 @@ gh smart-clone --contribute --dry-run contoso/cli
 Preview the path without cloning:
 
 ```sh
-gh smart-clone --print-path you/widgets
-gh smart-clone --dry-run you/widgets
+gh smart-clone --print-path YOUR_USERNAME/widgets
+gh smart-clone --dry-run YOUR_USERNAME/widgets
 ```
 
 Use your fork owner instead of the upstream owner:
 
 ```sh
-gh smart-clone --fork-placement fork you/widgets
+gh smart-clone --fork-placement fork YOUR_USERNAME/widgets
 ```
 
 Forward supported `gh repo clone` fork flags:
 
 ```sh
-gh smart-clone --upstream-remote-name parent you/widgets
-gh smart-clone --no-upstream you/widgets
+gh smart-clone --upstream-remote-name parent YOUR_USERNAME/widgets
+gh smart-clone --no-upstream YOUR_USERNAME/widgets
 ```
 
 Forward raw `git clone` flags after `--`:
 
 ```sh
-gh smart-clone you/widgets -- --depth=1
+gh smart-clone YOUR_USERNAME/widgets -- --depth=1
 ```
 
 ## Options
