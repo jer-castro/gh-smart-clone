@@ -506,6 +506,55 @@ test_contribute_sets_identity_and_ssh_alias_when_configured() {
   teardown
 }
 
+test_contribute_ssh_alias_flag_rewrites_origin_without_config() {
+  setup
+  local dest origin
+  dest="$tmpdir/home/Code/oss/anthropics/claude-code"
+  run_ext --contribute --ssh-alias github.com anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_eq "git@github.com:tmchow/claude-code.git" "$origin" "contribute --ssh-alias rewrites origin without git config"
+  teardown
+}
+
+test_contribute_ssh_alias_flag_overrides_config() {
+  setup
+  local dest origin
+  dest="$tmpdir/home/Code/oss/anthropics/claude-code"
+  git config --file "$tmpdir/gitconfig" smart-clone.sshAlias github.com-work
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --contribute --ssh-alias github.com-personal anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_eq "git@github.com-personal:tmchow/claude-code.git" "$origin" "contribute --ssh-alias overrides configured alias"
+  teardown
+}
+
+test_contribute_ssh_alias_flag_dry_run() {
+  setup
+  local output
+  output="$(run_ext --contribute --dry-run --ssh-alias github.com anthropics/claude-code)"
+  assert_contains "$output" "origin: git@github.com:tmchow/claude-code.git" "contribute dry-run shows --ssh-alias origin"
+  teardown
+}
+
+test_ssh_alias_requires_contribute() {
+  setup
+  local status stderr
+  status="$(run_ext_with_status --ssh-alias github.com anthropics/claude-code)"
+  stderr="$(cat "$tmpdir/stderr")"
+  assert_eq "1" "$status" "--ssh-alias without --contribute fails"
+  assert_contains "$stderr" "--ssh-alias can only be used with --contribute" "--ssh-alias requires contribute mode"
+  teardown
+}
+
+test_ssh_alias_rejects_empty_value() {
+  setup
+  local status stderr
+  status="$(run_ext_with_status --contribute --ssh-alias '' anthropics/claude-code)"
+  stderr="$(cat "$tmpdir/stderr")"
+  assert_eq "1" "$status" "empty --ssh-alias fails"
+  assert_contains "$stderr" "--ssh-alias requires a non-empty host" "empty --ssh-alias error is explicit"
+  teardown
+}
+
 test_contribute_no_fork_requires_existing_fork() {
   setup
   local status stderr
@@ -633,6 +682,11 @@ tests=(
   test_contribute_creates_fork_and_clones_fork_to_upstream_path
   test_contribute_reuses_existing_fork
   test_contribute_sets_identity_and_ssh_alias_when_configured
+  test_contribute_ssh_alias_flag_rewrites_origin_without_config
+  test_contribute_ssh_alias_flag_overrides_config
+  test_contribute_ssh_alias_flag_dry_run
+  test_ssh_alias_requires_contribute
+  test_ssh_alias_rejects_empty_value
   test_contribute_no_fork_requires_existing_fork
   test_contribute_existing_destination_requires_reconfigure
   test_contribute_reconfigure_updates_existing_checkout

@@ -17,6 +17,7 @@ EXAMPLES
   gh smart-clone --oss tmchow/orca
   gh smart-clone --group illo tmchow/illo-website
   gh smart-clone --contribute stablyai/orca
+  gh smart-clone --contribute --ssh-alias github.com stablyai/orca
   gh smart-clone --contribute --reconfigure stablyai/orca
   gh smart-clone --oss-prefix ~/src/external anthropics/claude-code
   gh smart-clone --prefix ~/Developer tmchow/orca
@@ -40,6 +41,9 @@ FLAGS
       --fork-owner <owner>        Account or org that should own contribution
                                   forks. Defaults to smart-clone.forkOwner,
                                   then the authenticated gh user.
+      --ssh-alias <host>          Rewrite contribution origin to
+                                  git@<host>:FORK/REPO.git. Defaults to
+                                  smart-clone.sshAlias when unset.
       --no-fork                   Do not create a fork. Require it to exist.
       --reconfigure               Reconfigure an existing contribution checkout
                                   instead of cloning.
@@ -283,6 +287,7 @@ oss_prefix=""
 oss_mode=false
 contribute=false
 fork_owner=""
+ssh_alias=""
 no_fork=false
 reconfigure=false
 fork_placement="upstream"
@@ -345,6 +350,16 @@ while (($#)); do
     --fork-owner=*)
       fork_owner="${1#--fork-owner=}"
       ;;
+    --ssh-alias)
+      shift
+      [[ $# -gt 0 ]] || die "--ssh-alias requires a host"
+      [[ -n "$1" ]] || die "--ssh-alias requires a non-empty host"
+      ssh_alias="$1"
+      ;;
+    --ssh-alias=*)
+      ssh_alias="${1#--ssh-alias=}"
+      [[ -n "$ssh_alias" ]] || die "--ssh-alias requires a non-empty host"
+      ;;
     --no-fork)
       no_fork=true
       ;;
@@ -405,6 +420,7 @@ esac
 
 if [[ "$contribute" != true ]]; then
   [[ -z "$fork_owner" ]] || die "--fork-owner can only be used with --contribute"
+  [[ -z "$ssh_alias" ]] || die "--ssh-alias can only be used with --contribute"
   [[ "$no_fork" == false ]] || die "--no-fork can only be used with --contribute"
   [[ "$reconfigure" == false ]] || die "--reconfigure can only be used with --contribute"
 fi
@@ -463,7 +479,7 @@ if [[ "$contribute" == true ]]; then
   auth_login="$(gh api user --jq .login)"
   fork_repo="$fork_owner/$name"
   origin_url="https://github.com/$fork_repo.git"
-  ssh_alias="$(git_config_get smart-clone.sshAlias)"
+  ssh_alias="${ssh_alias:-$(git_config_get smart-clone.sshAlias)}"
   git_name="$(git_config_get smart-clone.gitName)"
   git_email="$(git_config_get smart-clone.gitEmail)"
 

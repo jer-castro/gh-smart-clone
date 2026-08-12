@@ -129,6 +129,8 @@ git config --global smart-clone.sshAlias github.com-work
 
 Use `--fork-owner OWNER_OR_ORG` for one-off contribution workflows. If the fork owner differs from the authenticated `gh` user, the extension treats it as an organization fork target.
 
+Use `--ssh-alias <host>` when contribution `origin` should be SSH without relying on git config, for example `--ssh-alias github.com` or a Host alias like `--ssh-alias github.com-work`. The flag overrides `smart-clone.sshAlias` when both are set.
+
 ## Verification
 
 After contribution setup and before editing or pushing, verify:
