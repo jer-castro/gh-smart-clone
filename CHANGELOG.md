@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-- Add `--ssh-alias <host>` for contribution mode so origin can be rewritten to
-  an SSH URL without relying on `smart-clone.sshAlias` git config.
-- Flag overrides config when both are set; empty values are rejected.
-- Keep `--ssh-alias` contribute-only, matching `--fork-owner` scoping.
+- Let `--ssh-alias` rewrite `origin` in normal, `--oss`, and `--contribute`
+  modes. Contribution still rewrites the fork remote; other modes rewrite the
+  requested clone source.
+- `smart-clone.sshAlias` is the default in every mode. The flag still overrides
+  config, and empty flag values are still rejected.
 
 ## 0.4.0
 
