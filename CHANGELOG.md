@@ -7,6 +7,8 @@
   requested clone source.
 - `smart-clone.sshAlias` is the default in every mode. The flag still overrides
   config, and empty flag values are still rejected.
+- Broaden the agent skill description so clone, git clone, gh repo clone,
+  fork, OSS inspect, remotes, and identity requests trigger `gh-smart-clone`.
 
 ## 0.4.0
 

@@ -1,6 +1,6 @@
 ---
 name: gh-smart-clone
-description: Set up GitHub clones, forks, remotes, local identity, and grouping related repos under a shared folder.
+description: Clone GitHub repos with gh smart-clone. Use when cloning, git clone, gh repo clone, forking, contributing, inspecting OSS, remotes, local git identity, or grouping related repos.
 ---
 
 # gh-smart-clone
