@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Add `--private` to create or reuse an independent private repository with
+  contribution-style remotes: `origin` is the private repo, `upstream` is the
+  original project. Checkouts land under `<prefix>/private/<upstream-owner>/<repo>`
+  so they do not collide with `--oss` or `--contribute`.
+- `--private` implies contribution setup. GitHub cannot privately fork a
+  public repository, so this creates a private copy rather than a
+  fork-network fork. Refuse existing public repos or GitHub forks at the
+  write target.
+- Clone upstream when the private repository is new or empty, and clone the
+  private repository when it already has content.
+- Add `--private-prefix`, `GH_SMART_CLONE_PRIVATE_PREFIX`, and
+  `smart-clone.privatePrefix`. `--private-prefix` implies `--private`.
 - Let `--ssh-alias` rewrite `origin` in normal, `--oss`, and `--contribute`
   modes. Contribution still rewrites the fork remote; other modes rewrite the
   requested clone source.

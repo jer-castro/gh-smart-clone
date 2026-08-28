@@ -33,7 +33,7 @@ work each checkout is:
 other people's.
 
 **After** — the same repos with `gh smart-clone` (normal, `--oss`,
-`--contribute`, and `--group`):
+`--contribute`, `--private`, and `--group`):
 
 ```text
 ~/Code/
@@ -46,16 +46,19 @@ other people's.
 ├── acme/
 │   └── widgets/            # fork lives under upstream project identity
 │                           # origin -> YOUR_USERNAME/widgets
-└── oss/
-    ├── acme/
-    │   └── widgets/        # --oss: external inspection of the same project
+├── oss/
+│   ├── acme/
+│   │   └── widgets/        # --oss: external inspection of the same project
+│   └── contoso/
+│       └── cli/            # --contribute: origin=fork, upstream=contoso/cli
+└── private/
     └── contoso/
-        └── cli/            # --contribute: origin=fork, upstream=contoso/cli
+        └── cli/            # --private: origin=private repo, upstream=contoso/cli
 ```
 
 What changed: project identity stays in `owner/repo`, first-party vs external
-work is a root (`oss/`), related repos share a group folder, and fork ownership
-stays on the remotes—not the path.
+work is a root (`oss/` or `private/`), related repos share a group folder, and
+fork ownership stays on the remotes - not the path.
 
 ## Why this exists
 
@@ -72,8 +75,11 @@ identity, fork ownership, and write authority.
 For forks, the clone source stays as the repository you requested: your fork
 remains `origin`, while `gh repo clone` can still configure the parent as
 `upstream`. Contribution mode (`--contribute`) is different: it treats the
-input as the upstream project, creates or reuses your fork, clones the fork as
-`origin`, and configures `upstream` to the original repository.
+input as the upstream project, creates or reuses your write repository, clones
+with `origin` pointing at that write repo, and configures `upstream` to the
+original repository. `--contribute` uses a GitHub fork. `--private` uses an
+independent private repository because GitHub cannot make a private fork of a
+public repo.
 
 ## Mental model
 
@@ -82,13 +88,13 @@ Five concerns are kept separate on purpose:
 | Concern | Encoded by | Answers |
 | --- | --- | --- |
 | Project identity | `owner/repo` path segment (upstream by default for forks) | What canonical project is this? |
-| Workspace relationship | Main prefix vs `oss/` | First-party/maintained work, or external OSS? |
+| Workspace relationship | Main prefix vs `oss/` vs `private/` | First-party/maintained work, external OSS, or a private working copy? |
 | Fork ownership | Remotes (`origin` / `upstream`), not the path | Where do pushes and upstream pulls go? |
 | Logical multi-repo workspace | `--group` parent directory | Which related repos form one working surface? |
-| Git identity | Optional local `user.name` / `user.email` in contribution mode | Which author should commits use here? |
+| Git identity | Optional local `user.name` / `user.email` in contribution and private-copy modes | Which author should commits use here? |
 
-Fork owner is a push mechanism, not project identity. The `oss/` root is a
-workflow boundary, not merely a tidy folder name. `--group` defines a shared
+Fork owner is a push mechanism, not project identity. The `oss/` and `private/`
+roots are workflow boundaries, not merely tidy folder names. `--group` defines a shared
 parent directory that humans and agents can treat as one logical project root
 across multiple repositories; it does not change remotes, fork ownership, or
 local git identity.
@@ -132,8 +138,9 @@ gh extension install .
 
 This repository also publishes an agent skill at
 `skills/gh-smart-clone/SKILL.md`. Use it so agents default to `gh smart-clone`
-and choose correctly among normal mode, `--oss` inspection, and `--contribute`
-fork setup—instead of falling back to raw `git clone` / `gh repo clone`.
+and choose correctly among normal mode, `--oss` inspection, `--contribute`
+fork setup, and `--private` private copies - instead of falling back to raw
+`git clone` / `gh repo clone`.
 
 Install it globally (recommended):
 
@@ -288,7 +295,7 @@ gh smart-clone --contribute contoso/cli
 ```
 
 This mode may create external GitHub state. Normal clone mode and `--oss` never
-create forks.
+create forks or private copies.
 
 Contribution mode:
 
@@ -324,11 +331,11 @@ gh smart-clone --contribute --ssh-alias github.com-work contoso/cli
 every mode. Normal and `--oss` rewrite the requested clone source. Contribution
 rewrites the fork remote. Use plain `github.com` for default SSH, or an SSH
 config Host alias. The flag overrides `smart-clone.sshAlias` when both are set.
-In `--contribute`, `upstream` remains HTTPS.
+In `--contribute` and `--private`, `upstream` remains HTTPS.
 
-If the fork owner differs from the authenticated `gh` user, `gh-smart-clone`
+If the fork owner differs from the authenticated `gh` user, `--contribute`
 treats it as an organization fork target and passes `--org OWNER_OR_ORG` to
-`gh repo fork`.
+`gh repo fork`. `--private` creates `OWNER_OR_ORG/REPO` with `gh repo create`.
 
 Require the fork to already exist:
 
@@ -342,11 +349,49 @@ If a contribution checkout already exists, reconfigure it intentionally:
 gh smart-clone --contribute --reconfigure contoso/cli
 ```
 
-`--print-path` and `--dry-run` do not create forks:
+`--print-path` and `--dry-run` do not create forks or private copies:
 
 ```sh
 gh smart-clone --contribute --print-path contoso/cli
 gh smart-clone --contribute --dry-run contoso/cli
+```
+
+### Private Copies
+
+Use `--private` when you want contribution-style remotes without a public
+GitHub fork. GitHub cannot make a private fork of a public repository, so
+this creates or reuses an independent private repo instead:
+
+```sh
+gh smart-clone --private contoso/cli
+# -> ~/Code/private/contoso/cli
+# origin   -> YOUR_USERNAME/cli (private, not a GitHub fork)
+# upstream -> contoso/cli
+```
+
+`--private` implies contribution checkout setup: `--fork-owner`, `--no-fork`,
+`--reconfigure`, and optional local git identity. It never calls `gh repo fork`.
+`--contribute --private` is the same as `--private`, including the private
+root. The default private root is `<resolved-prefix>/private`, so a
+contribution checkout and a private copy of the same project can both exist.
+
+Override the private root with `--private-prefix`, `smart-clone.privatePrefix`,
+or `GH_SMART_CLONE_PRIVATE_PREFIX`. `--private-prefix` implies `--private`.
+`--private` cannot be combined with `--oss` or `--oss-prefix`.
+
+The private repository is not in GitHub's fork network, so it cannot open a
+pull request against upstream through the fork PR workflow. Use `--contribute`
+when you intend to submit a PR.
+
+If the private repo is new or empty, `gh-smart-clone` clones the upstream
+project and points `origin` at the private repo. If the private repo already
+has content, it clones that repo instead. `--dry-run` and `--print-path` do
+not create the private repository:
+
+```sh
+gh smart-clone --private --print-path contoso/cli
+gh smart-clone --private --dry-run contoso/cli
+gh smart-clone --private --reconfigure contoso/cli
 ```
 
 Preview the path without cloning:
@@ -390,16 +435,26 @@ gh smart-clone YOUR_USERNAME/widgets -- --depth=1
                                 smart-clone.ossPrefix, then <prefix>/oss.
     --contribute                Create/reuse a fork, clone the fork, and place
                                 the checkout under the upstream OSS path.
+    --private                   Create/reuse a private repository instead of a
+                                GitHub fork. Implies contribution checkout
+                                setup under the private root: origin=private
+                                repo, upstream=original.
+    --private-prefix <path>     Private-copy clone root. Implies --private.
+                                Defaults to GH_SMART_CLONE_PRIVATE_PREFIX,
+                                then git config smart-clone.privatePrefix,
+                                then <prefix>/private.
     --fork-owner <owner>        Account or org that should own contribution
-                                forks. Defaults to smart-clone.forkOwner,
-                                then the authenticated gh user.
+                                forks or private copies. Defaults to
+                                smart-clone.forkOwner, then the authenticated
+                                gh user.
     --ssh-alias <host>          Rewrite origin to git@<host>:OWNER/REPO.git
-                                after clone. In --contribute, OWNER is the
-                                fork owner. Defaults to smart-clone.sshAlias
-                                when unset.
-    --no-fork                   Do not create a fork. Require it to exist.
-    --reconfigure               Reconfigure an existing contribution checkout
-                                instead of cloning.
+                                after clone. In --contribute and --private,
+                                OWNER is the write-repo owner. Defaults to
+                                smart-clone.sshAlias when unset.
+    --no-fork                   Do not create a fork or private repository.
+                                Require it to exist.
+    --reconfigure               Reconfigure an existing contribution or
+                                private-copy checkout instead of cloning.
     --fork-placement <policy>   Where forks are placed: upstream or fork.
                                 Defaults to upstream.
     --dry-run                   Print what would happen without cloning.

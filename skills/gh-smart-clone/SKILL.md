@@ -1,6 +1,6 @@
 ---
 name: gh-smart-clone
-description: Clone GitHub repos with gh smart-clone. Use when cloning, git clone, gh repo clone, forking, contributing, inspecting OSS, remotes, local git identity, or grouping related repos.
+description: Clone GitHub repos with gh smart-clone. Use when cloning, git clone, gh repo clone, forking, contributing, inspecting OSS, remotes, local git identity, grouping related repos, or creating a private copy of an external repo.
 ---
 
 # gh-smart-clone
@@ -65,6 +65,26 @@ upstream: upstream project pull remote
 
 If the user passes an existing fork, treat the parent as the canonical upstream project when possible. The fork owner is a push mechanism, not the project identity.
 
+### Private Working Copy
+
+Use `--private` when the user wants a hidden working copy of an external project with contribution-style remotes, not a public GitHub fork.
+
+```sh
+gh smart-clone --private OWNER/REPO
+```
+
+GitHub cannot make a private fork of a public repository. This mode creates or reuses an independent private repo instead of calling `gh repo fork`. Remotes match contribution mode, but the checkout uses the private root so it does not collide with `--oss` or `--contribute`:
+
+```text
+path:     ~/Code/private/UPSTREAM_OWNER/REPO
+origin:   private repo under the fork owner
+upstream: upstream project pull remote
+```
+
+`--private` implies contribution setup, so `--fork-owner`, `--no-fork`, `--reconfigure`, and local git identity apply. `--contribute --private` is the same as `--private` and still uses the private root.
+
+The private repository is not a GitHub fork, so it cannot open a pull request against upstream through the fork PR workflow. If the user intends to submit a PR, use `--contribute` instead.
+
 ### Existing Checkout
 
 If the destination already exists, do not silently reclone over it or mutate remotes. Inspect it first:
@@ -75,10 +95,11 @@ git -C /path/to/checkout config user.name
 git -C /path/to/checkout config user.email
 ```
 
-Use `--contribute --reconfigure` only when the user wants the existing checkout intentionally updated for contribution workflow remotes and optional local identity.
+Use `--contribute --reconfigure` or `--private --reconfigure` only when the user wants the existing checkout intentionally updated for contribution or private-copy remotes and optional local identity.
 
 ```sh
 gh smart-clone --contribute --reconfigure OWNER/REPO
+gh smart-clone --private --reconfigure OWNER/REPO
 ```
 
 ### Grouping Related Repos
@@ -99,15 +120,16 @@ Result:
 ~/Code/tmchow/illo/illo-characters
 ```
 
-The group folder is plain organization, not a checkout: it is never itself a git repository and never gets remotes. Grouping is explicit because it cannot be safely inferred. Do not assume a shared name prefix (`illo-*`) implies a group; only group when the user asks to. `--group` composes with every mode, so `--oss --group vendor` and `--contribute --group vendor` place the grouped folder under the correct root and upstream path.
+The group folder is plain organization, not a checkout: it is never itself a git repository and never gets remotes. Grouping is explicit because it cannot be safely inferred. Do not assume a shared name prefix (`illo-*`) implies a group; only group when the user asks to. `--group` composes with every mode, so `--oss --group vendor`, `--contribute --group vendor`, and `--private --group vendor` place the grouped folder under the correct root and upstream path (`oss/` vs `private/`).
 
 ## Operating Principles
 
 - Prefer `gh smart-clone` for GitHub clone and fork setup whenever it is installed.
 - Keep project identity in the owner/repo path. For forks, the path should usually name the upstream project.
-- Keep work relationship in the root. Main workspace means first-party/maintained work; `oss/` means external work.
-- Treat fork creation as a side effect. Only `--contribute` may create or reuse a fork for contribution setup.
-- Use `--oss` for inspection. Do not create forks just because a repo is external.
+- Keep work relationship in the root. Main workspace means first-party/maintained work; `oss/` means external work; `private/` means a private working copy of external work.
+- Treat fork and private-copy creation as a side effect. Only `--contribute` may create or reuse a GitHub fork. Only `--private` may create or reuse a private copy.
+- Use `--oss` for inspection. Do not create forks or private copies just because a repo is external.
+- Use `--private` when the user wants a hidden write remote. Use `--contribute` when they intend to submit a GitHub PR from a fork.
 - Treat `--group` as cosmetic. It only organizes checkouts on disk; it never changes identity, remotes, or authority, and it is used only when the user asks to group repos.
 - Verify remotes and local git identity before editing, committing, or pushing in contribution checkouts.
 - Fail or ask before changing an existing checkout unless `--reconfigure` is explicit.
@@ -121,15 +143,16 @@ Relevant user-level configuration:
 ```sh
 git config --global smart-clone.prefix ~/Code
 git config --global smart-clone.ossPrefix ~/Code/oss
+git config --global smart-clone.privatePrefix ~/Code/private
 git config --global smart-clone.forkOwner OWNER_OR_ORG
 git config --global smart-clone.gitName "Example Name"
 git config --global smart-clone.gitEmail person@example.com
 git config --global smart-clone.sshAlias github.com-work
 ```
 
-Use `--fork-owner OWNER_OR_ORG` for one-off contribution workflows. If the fork owner differs from the authenticated `gh` user, the extension treats it as an organization fork target.
+Use `--fork-owner OWNER_OR_ORG` for one-off contribution or private-copy workflows. If the fork owner differs from the authenticated `gh` user, `--contribute` treats it as an organization fork target and `--private` creates the private repo under that owner.
 
-Use `--ssh-alias <host>` when `origin` should be SSH without relying on git config, for example `--ssh-alias github.com` or a Host alias like `--ssh-alias github.com-work`. It works in normal, `--oss`, and `--contribute` modes. The flag overrides `smart-clone.sshAlias` when both are set.
+Use `--ssh-alias <host>` when `origin` should be SSH without relying on git config, for example `--ssh-alias github.com` or a Host alias like `--ssh-alias github.com-work`. It works in normal, `--oss`, `--contribute`, and `--private` modes. The flag overrides `smart-clone.sshAlias` when both are set.
 
 ## Verification
 
@@ -145,9 +168,9 @@ gh auth status
 
 Confirm these facts:
 
-- The checkout path is under the intended first-party or `oss/` root.
-- `origin` points to the intended fork or owned repository.
-- `upstream` points to the original project for contribution checkouts.
+- The checkout path is under the intended first-party, `oss/`, or `private/` root.
+- `origin` points to the intended fork, private copy, or owned repository.
+- `upstream` points to the original project for contribution and private-copy checkouts.
 - The authenticated GitHub account and local git identity match the work context.
 - Existing checkout changes were made only through explicit `--reconfigure`.
 
@@ -155,7 +178,9 @@ Confirm these facts:
 
 - Cloning a contribution fork under the fork owner's path instead of the upstream project path.
 - Using `--oss` when the user actually intends to contribute through a fork; use `--contribute` instead.
-- Creating forks during inspection tasks. Fork creation belongs only to contribution mode.
+- Using `--private` when the user actually intends to submit a GitHub PR; use `--contribute` instead.
+- Creating forks or private copies during inspection tasks. Those mutations belong only to `--contribute` and `--private`.
+- Reusing a public repo or GitHub fork as a `--private` write target.
 - Pushing with the wrong GitHub account or SSH alias.
 - Mutating an existing checkout's remotes without explicit reconfiguration intent.
 - Reusing a fork whose parent is not the requested upstream project.
