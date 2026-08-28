@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Let `--ssh-alias` rewrite `origin` in normal, `--oss`, and `--contribute`
+  modes. Contribution still rewrites the fork remote; other modes rewrite the
+  requested clone source.
+- `smart-clone.sshAlias` is the default in every mode. The flag still overrides
+  config, and empty flag values are still rejected.
+- Broaden the agent skill description so clone, git clone, gh repo clone,
+  fork, OSS inspect, remotes, and identity requests trigger `gh-smart-clone`.
+
 ## 0.4.0
 
 - Add `--group`/`-g` to place a cosmetic organizational folder between owner and

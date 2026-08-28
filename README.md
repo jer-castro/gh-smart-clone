@@ -310,11 +310,21 @@ git config --global smart-clone.gitEmail person@example.com
 git config --global smart-clone.sshAlias github.com-work
 ```
 
-Use a one-off fork owner:
+Use a one-off fork owner or SSH alias:
 
 ```sh
 gh smart-clone --contribute --fork-owner OWNER_OR_ORG contoso/cli
+gh smart-clone --ssh-alias github.com YOUR_USERNAME/notes
+gh smart-clone --oss --ssh-alias github.com-work acme/widgets
+gh smart-clone --contribute --ssh-alias github.com contoso/cli
+gh smart-clone --contribute --ssh-alias github.com-work contoso/cli
 ```
+
+`--ssh-alias` rewrites `origin` to `git@<host>:OWNER/REPO.git` after clone in
+every mode. Normal and `--oss` rewrite the requested clone source. Contribution
+rewrites the fork remote. Use plain `github.com` for default SSH, or an SSH
+config Host alias. The flag overrides `smart-clone.sshAlias` when both are set.
+In `--contribute`, `upstream` remains HTTPS.
 
 If the fork owner differs from the authenticated `gh` user, `gh-smart-clone`
 treats it as an organization fork target and passes `--org OWNER_OR_ORG` to
@@ -383,6 +393,10 @@ gh smart-clone YOUR_USERNAME/widgets -- --depth=1
     --fork-owner <owner>        Account or org that should own contribution
                                 forks. Defaults to smart-clone.forkOwner,
                                 then the authenticated gh user.
+    --ssh-alias <host>          Rewrite origin to git@<host>:OWNER/REPO.git
+                                after clone. In --contribute, OWNER is the
+                                fork owner. Defaults to smart-clone.sshAlias
+                                when unset.
     --no-fork                   Do not create a fork. Require it to exist.
     --reconfigure               Reconfigure an existing contribution checkout
                                 instead of cloning.

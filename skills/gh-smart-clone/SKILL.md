@@ -1,6 +1,6 @@
 ---
 name: gh-smart-clone
-description: Set up GitHub clones, forks, remotes, local identity, and grouping related repos under a shared folder.
+description: Clone GitHub repos with gh smart-clone. Use when cloning, git clone, gh repo clone, forking, contributing, inspecting OSS, remotes, local git identity, or grouping related repos.
 ---
 
 # gh-smart-clone
@@ -128,6 +128,8 @@ git config --global smart-clone.sshAlias github.com-work
 ```
 
 Use `--fork-owner OWNER_OR_ORG` for one-off contribution workflows. If the fork owner differs from the authenticated `gh` user, the extension treats it as an organization fork target.
+
+Use `--ssh-alias <host>` when `origin` should be SSH without relying on git config, for example `--ssh-alias github.com` or a Host alias like `--ssh-alias github.com-work`. It works in normal, `--oss`, and `--contribute` modes. The flag overrides `smart-clone.sshAlias` when both are set.
 
 ## Verification
 

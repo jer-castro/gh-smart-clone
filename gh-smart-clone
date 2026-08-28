@@ -16,7 +16,10 @@ EXAMPLES
   gh smart-clone tmchow/orca
   gh smart-clone --oss tmchow/orca
   gh smart-clone --group illo tmchow/illo-website
+  gh smart-clone --ssh-alias github.com tmchow/foo
+  gh smart-clone --oss --ssh-alias github.com-work tmchow/orca
   gh smart-clone --contribute stablyai/orca
+  gh smart-clone --contribute --ssh-alias github.com stablyai/orca
   gh smart-clone --contribute --reconfigure stablyai/orca
   gh smart-clone --oss-prefix ~/src/external anthropics/claude-code
   gh smart-clone --prefix ~/Developer tmchow/orca
@@ -40,6 +43,10 @@ FLAGS
       --fork-owner <owner>        Account or org that should own contribution
                                   forks. Defaults to smart-clone.forkOwner,
                                   then the authenticated gh user.
+      --ssh-alias <host>          Rewrite origin to git@<host>:OWNER/REPO.git
+                                  after clone. In --contribute, OWNER is the
+                                  fork owner. Defaults to smart-clone.sshAlias
+                                  when unset.
       --no-fork                   Do not create a fork. Require it to exist.
       --reconfigure               Reconfigure an existing contribution checkout
                                   instead of cloning.
@@ -132,6 +139,12 @@ default_oss_prefix() {
 
 git_config_get() {
   git config --get "$1" 2>/dev/null || true
+}
+
+ssh_origin_url() {
+  local host="$1"
+  local repo="$2"
+  printf 'git@%s:%s.git\n' "$host" "$repo"
 }
 
 repo_info() {
@@ -283,6 +296,7 @@ oss_prefix=""
 oss_mode=false
 contribute=false
 fork_owner=""
+ssh_alias=""
 no_fork=false
 reconfigure=false
 fork_placement="upstream"
@@ -344,6 +358,16 @@ while (($#)); do
       ;;
     --fork-owner=*)
       fork_owner="${1#--fork-owner=}"
+      ;;
+    --ssh-alias)
+      shift
+      [[ $# -gt 0 ]] || die "--ssh-alias requires a host"
+      [[ -n "$1" ]] || die "--ssh-alias requires a non-empty host"
+      ssh_alias="$1"
+      ;;
+    --ssh-alias=*)
+      ssh_alias="${1#--ssh-alias=}"
+      [[ -n "$ssh_alias" ]] || die "--ssh-alias requires a non-empty host"
       ;;
     --no-fork)
       no_fork=true
@@ -452,6 +476,8 @@ if [[ "$print_path" == true ]]; then
   exit 0
 fi
 
+ssh_alias="${ssh_alias:-$(git_config_get smart-clone.sshAlias)}"
+
 if [[ "$contribute" == true ]]; then
   fork_owner="$(resolve_fork_owner "$fork_owner")"
   [[ -n "$fork_owner" ]] || die "could not determine fork owner"
@@ -463,12 +489,11 @@ if [[ "$contribute" == true ]]; then
   auth_login="$(gh api user --jq .login)"
   fork_repo="$fork_owner/$name"
   origin_url="https://github.com/$fork_repo.git"
-  ssh_alias="$(git_config_get smart-clone.sshAlias)"
   git_name="$(git_config_get smart-clone.gitName)"
   git_email="$(git_config_get smart-clone.gitEmail)"
 
   if [[ -n "$ssh_alias" ]]; then
-    origin_url="git@$ssh_alias:$fork_repo.git"
+    origin_url="$(ssh_origin_url "$ssh_alias" "$fork_repo")"
   fi
 
   if [[ "$dry_run" == true ]]; then
@@ -548,6 +573,9 @@ if [[ "$dry_run" == true ]]; then
     printf ' %q' "${git_clone_flags[@]}"
   fi
   printf '\n'
+  if [[ -n "$ssh_alias" ]]; then
+    printf 'origin: %s\n' "$(ssh_origin_url "$ssh_alias" "$requested_repo")"
+  fi
   exit 0
 fi
 
@@ -562,6 +590,9 @@ if ((${#git_clone_flags[@]})); then
 fi
 
 "${cmd[@]}"
+if [[ -n "$ssh_alias" ]]; then
+  remote_set "$destination" origin "$(ssh_origin_url "$ssh_alias" "$requested_repo")"
+fi
 printf 'Cloned %s to %s\n' "$requested_repo" "$destination"
 if [[ "$canonical_repo" != "$requested_repo" ]]; then
   printf 'Placed under upstream project identity: %s\n' "$canonical_repo"
