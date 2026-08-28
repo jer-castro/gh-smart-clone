@@ -22,42 +22,54 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
   repo="$3"
   case "$repo" in
     tmchow/foo)
-      printf 'tmchow/foo\tfalse\t\n'
+      printf 'tmchow/foo|false||false|false\n'
       ;;
     EveryInc/compound-engineering-plugin)
-      printf 'EveryInc/compound-engineering-plugin\tfalse\t\n'
+      printf 'EveryInc/compound-engineering-plugin|false||false|false\n'
       ;;
     tmchow/orca)
-      printf 'tmchow/orca\ttrue\tstablyai/orca\n'
+      printf 'tmchow/orca|true|stablyai/orca|false|false\n'
       ;;
     stablyai/orca)
-      printf 'stablyai/orca\tfalse\t\n'
+      printf 'stablyai/orca|false||false|false\n'
       ;;
     anthropics/claude-code)
-      printf 'anthropics/claude-code\tfalse\t\n'
+      printf 'anthropics/claude-code|false||false|false\n'
       ;;
     tmchow/claude-code)
       if [[ "${GH_FAKE_BAD_FORK:-}" == "1" ]]; then
-        printf 'tmchow/claude-code\ttrue\tother/claude-code\n'
+        printf 'tmchow/claude-code|true|other/claude-code|false|false\n'
       elif [[ "${GH_FAKE_NONFORK:-}" == "1" ]]; then
-        printf 'tmchow/claude-code\tfalse\t\n'
-      elif [[ "${GH_FAKE_FORK_EXISTS:-}" == "1" || -s "${GH_FAKE_STATE:-/dev/null}" ]]; then
-        printf 'tmchow/claude-code\ttrue\tanthropics/claude-code\n'
+        printf 'tmchow/claude-code|false||false|false\n'
+      elif [[ "${GH_FAKE_PRIVATE_EXISTS:-}" == "1" ]]; then
+        if [[ "${GH_FAKE_PRIVATE_EMPTY:-}" == "1" ]]; then
+          printf 'tmchow/claude-code|false||true|true\n'
+        else
+          printf 'tmchow/claude-code|false||true|false\n'
+        fi
+      elif [[ -s "${GH_FAKE_STATE:-/dev/null}" && "$(cat "${GH_FAKE_STATE}")" == "private" ]]; then
+        printf 'tmchow/claude-code|false||true|true\n'
+      elif [[ "${GH_FAKE_FORK_EXISTS:-}" == "1" || ( -s "${GH_FAKE_STATE:-/dev/null}" && "$(cat "${GH_FAKE_STATE}")" == "fork" ) ]]; then
+        printf 'tmchow/claude-code|true|anthropics/claude-code|false|false\n'
       else
         printf 'unknown repo %s\n' "$repo" >&2
         exit 1
       fi
       ;;
     octo-org/claude-code)
-      if [[ "${GH_FAKE_FORK_EXISTS:-}" == "1" || -s "${GH_FAKE_STATE:-/dev/null}" ]]; then
-        printf 'octo-org/claude-code\ttrue\tanthropics/claude-code\n'
+      if [[ "${GH_FAKE_PRIVATE_EXISTS:-}" == "1" ]]; then
+        printf 'octo-org/claude-code|false||true|false\n'
+      elif [[ -s "${GH_FAKE_STATE:-/dev/null}" && "$(cat "${GH_FAKE_STATE}")" == "private" ]]; then
+        printf 'octo-org/claude-code|false||true|true\n'
+      elif [[ "${GH_FAKE_FORK_EXISTS:-}" == "1" || ( -s "${GH_FAKE_STATE:-/dev/null}" && "$(cat "${GH_FAKE_STATE}")" == "fork" ) ]]; then
+        printf 'octo-org/claude-code|true|anthropics/claude-code|false|false\n'
       else
         printf 'unknown repo %s\n' "$repo" >&2
         exit 1
       fi
       ;;
     https://github.com/tmchow/orca)
-      printf 'tmchow/orca\ttrue\tstablyai/orca\n'
+      printf 'tmchow/orca|true|stablyai/orca|false|false\n'
       ;;
     *)
       printf 'unknown repo %s\n' "$repo" >&2
@@ -71,8 +83,17 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "fork" ]]; then
   if [[ -n "${GH_FAKE_LOG:-}" ]]; then
     printf 'gh %s\n' "$*" >>"$GH_FAKE_LOG"
   fi
-  printf '%s\n' "$3" >"${GH_FAKE_STATE:?}"
+  printf 'fork\n' >"${GH_FAKE_STATE:?}"
   printf 'forked\t%s\n' "$3"
+  exit 0
+fi
+
+if [[ "${1:-}" == "repo" && "${2:-}" == "create" ]]; then
+  if [[ -n "${GH_FAKE_LOG:-}" ]]; then
+    printf 'gh %s\n' "$*" >>"$GH_FAKE_LOG"
+  fi
+  printf 'private\n' >"${GH_FAKE_STATE:?}"
+  printf 'created\t%s\n' "$3"
   exit 0
 fi
 
@@ -184,6 +205,8 @@ test_skill_frontmatter_is_agent_trigger_ready() {
   assert_contains "$body" "First-party or Maintained Repo" "skill body explains first-party scenario"
   assert_contains "$body" "External OSS Inspection" "skill body explains oss inspection scenario"
   assert_contains "$body" "External OSS Contribution" "skill body explains contribution scenario"
+  assert_contains "$body" "Private Working Copy" "skill body explains private-copy scenario"
+  assert_contains "$description" "private" "skill description mentions private copies"
 }
 
 test_normal_repo_uses_owner_path() {
@@ -686,6 +709,256 @@ test_contribute_refuses_upstream_owned_by_fork_owner() {
   teardown
 }
 
+test_private_print_path_uses_private_upstream_path_without_mutation() {
+  setup
+  local output log
+  output="$(run_ext --private --print-path anthropics/claude-code)"
+  log="$(cat "$tmpdir/gh.log")"
+  assert_eq "$tmpdir/home/Code/private/anthropics/claude-code" "$output" "private print-path uses upstream private path"
+  assert_not_contains "$log" "repo create" "private print-path does not create a repository"
+  assert_not_contains "$log" "repo fork" "private print-path does not create a fork"
+  assert_not_contains "$log" "repo clone" "private print-path does not clone"
+  teardown
+}
+
+test_private_dry_run_lists_external_actions_without_mutation() {
+  setup
+  local output log
+  output="$(run_ext --private --dry-run anthropics/claude-code)"
+  log="$(cat "$tmpdir/gh.log")"
+  assert_contains "$output" "mode: private" "private dry-run names mode"
+  assert_contains "$output" "action: ensure private repository tmchow/claude-code from anthropics/claude-code" "private dry-run shows private repo action"
+  assert_contains "$output" "action: clone anthropics/claude-code to $tmpdir/home/Code/private/anthropics/claude-code with origin=tmchow/claude-code" "private dry-run shows clone action"
+  assert_not_contains "$log" "repo create" "private dry-run does not create a repository"
+  assert_not_contains "$log" "repo fork" "private dry-run does not create a fork"
+  assert_not_contains "$log" "repo clone" "private dry-run does not clone"
+  teardown
+}
+
+test_private_creates_repo_and_clones_upstream_to_private_path() {
+  setup
+  local dest origin upstream output log
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  output="$(run_ext --private anthropics/claude-code)"
+  origin="$(git -C "$dest" remote get-url origin)"
+  upstream="$(git -C "$dest" remote get-url upstream)"
+  log="$(cat "$tmpdir/gh.log")"
+  assert_contains "$log" "gh repo create tmchow/claude-code --private --description Private copy of anthropics/claude-code" "private creates missing private repository"
+  assert_not_contains "$log" "repo fork" "private does not create a GitHub fork"
+  assert_contains "$output" $'clone\tanthropics/claude-code\t'"$dest" "private clones upstream when the private repo is new"
+  assert_eq "https://github.com/tmchow/claude-code.git" "$origin" "private configures origin to the private repository"
+  assert_eq "https://github.com/anthropics/claude-code.git" "$upstream" "private configures upstream remote"
+  teardown
+}
+
+test_private_reuses_existing_nonempty_private_repo() {
+  setup
+  local log
+  GH_FAKE_PRIVATE_EXISTS=1 run_ext --private anthropics/claude-code >/dev/null
+  log="$(cat "$tmpdir/gh.log")"
+  assert_not_contains "$log" "repo create" "private reuses existing private repository without creating"
+  assert_not_contains "$log" "repo fork" "private reuse does not create a fork"
+  assert_contains "$log" "gh repo clone tmchow/claude-code" "private clones existing nonempty private repository"
+  teardown
+}
+
+test_private_reuses_existing_empty_private_repo() {
+  setup
+  local log
+  GH_FAKE_PRIVATE_EXISTS=1 GH_FAKE_PRIVATE_EMPTY=1 run_ext --private anthropics/claude-code >/dev/null
+  log="$(cat "$tmpdir/gh.log")"
+  assert_not_contains "$log" "repo create" "private does not recreate an existing empty private repository"
+  assert_contains "$log" "gh repo clone anthropics/claude-code" "private clones upstream when the private repository is empty"
+  teardown
+}
+
+test_private_sets_identity_and_ssh_alias_when_configured() {
+  setup
+  local dest origin git_name git_email
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  git config --file "$tmpdir/gitconfig" smart-clone.gitName "Example User"
+  git config --file "$tmpdir/gitconfig" smart-clone.gitEmail user@example.com
+  git config --file "$tmpdir/gitconfig" smart-clone.sshAlias github.com-work
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --private anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  git_name="$(git -C "$dest" config user.name)"
+  git_email="$(git -C "$dest" config user.email)"
+  assert_eq "git@github.com-work:tmchow/claude-code.git" "$origin" "private rewrites origin to ssh alias"
+  assert_eq "Example User" "$git_name" "private sets configured user.name"
+  assert_eq "user@example.com" "$git_email" "private sets configured user.email"
+  teardown
+}
+
+test_private_no_fork_requires_existing_private_repo() {
+  setup
+  local status stderr
+  status="$(run_ext_with_status --private --no-fork anthropics/claude-code)"
+  stderr="$(cat "$tmpdir/stderr")"
+  assert_eq "1" "$status" "private --no-fork fails when private repository is missing"
+  assert_contains "$stderr" "required private repository does not exist: tmchow/claude-code" "private --no-fork explains missing repository"
+  teardown
+}
+
+test_private_existing_destination_requires_reconfigure() {
+  setup
+  local dest status stderr
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  mkdir -p "$dest"
+  git -C "$dest" init -q
+  git -C "$dest" remote add origin https://github.com/wrong/claude-code.git
+  status="$(GH_FAKE_PRIVATE_EXISTS=1 run_ext_with_status --private anthropics/claude-code)"
+  stderr="$(cat "$tmpdir/stderr")"
+  assert_eq "1" "$status" "private refuses existing checkout without reconfigure"
+  assert_contains "$stderr" "use --private --reconfigure" "existing private checkout failure points to reconfigure"
+  teardown
+}
+
+test_private_reconfigure_updates_existing_checkout() {
+  setup
+  local dest output origin upstream git_name git_email
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  mkdir -p "$dest"
+  git -C "$dest" init -q
+  git -C "$dest" remote add origin https://github.com/wrong/claude-code.git
+  git -C "$dest" remote add upstream https://github.com/wrong/upstream.git
+  git config --file "$tmpdir/gitconfig" smart-clone.gitName "Example User"
+  git config --file "$tmpdir/gitconfig" smart-clone.gitEmail user@example.com
+  git config --file "$tmpdir/gitconfig" smart-clone.sshAlias github.com-work
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GH_FAKE_PRIVATE_EXISTS=1 run_ext --private --reconfigure anthropics/claude-code)"
+  origin="$(git -C "$dest" remote get-url origin)"
+  upstream="$(git -C "$dest" remote get-url upstream)"
+  git_name="$(git -C "$dest" config user.name)"
+  git_email="$(git -C "$dest" config user.email)"
+  assert_contains "$output" "Reconfigured $dest as a private copy of anthropics/claude-code" "private reconfigure reports updated checkout"
+  assert_eq "git@github.com-work:tmchow/claude-code.git" "$origin" "private reconfigure updates origin"
+  assert_eq "https://github.com/anthropics/claude-code.git" "$upstream" "private reconfigure updates upstream"
+  assert_eq "Example User" "$git_name" "private reconfigure sets user.name"
+  assert_eq "user@example.com" "$git_email" "private reconfigure sets user.email"
+  teardown
+}
+
+test_private_errors_when_existing_repo_is_a_fork() {
+  setup
+  local status stderr
+  status="$(GH_FAKE_FORK_EXISTS=1 run_ext_with_status --private anthropics/claude-code)"
+  stderr="$(cat "$tmpdir/stderr")"
+  assert_eq "1" "$status" "private fails when the write target is a GitHub fork"
+  assert_contains "$stderr" "tmchow/claude-code exists as a GitHub fork of anthropics/claude-code" "private fork-collision error is explicit"
+  teardown
+}
+
+test_private_errors_when_existing_repo_is_not_private() {
+  setup
+  local status stderr
+  status="$(GH_FAKE_NONFORK=1 run_ext_with_status --private anthropics/claude-code)"
+  stderr="$(cat "$tmpdir/stderr")"
+  assert_eq "1" "$status" "private fails when the write target is public"
+  assert_contains "$stderr" "tmchow/claude-code exists but is not private" "public write-target error is explicit"
+  teardown
+}
+
+test_private_org_owner_uses_repo_create() {
+  setup
+  local log dest origin
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  git config --file "$tmpdir/gitconfig" smart-clone.forkOwner octo-org
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GH_FAKE_LOGIN=tmchow run_ext --private anthropics/claude-code >/dev/null
+  log="$(cat "$tmpdir/gh.log")"
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_contains "$log" "gh repo create octo-org/claude-code --private --description Private copy of anthropics/claude-code" "private uses gh repo create for org owner"
+  assert_not_contains "$log" "repo fork" "private org owner does not use gh repo fork"
+  assert_eq "https://github.com/octo-org/claude-code.git" "$origin" "org private owner controls origin repo"
+  teardown
+}
+
+test_private_contribute_flag_is_equivalent() {
+  setup
+  local dest origin upstream log
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  run_ext --contribute --private anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  upstream="$(git -C "$dest" remote get-url upstream)"
+  log="$(cat "$tmpdir/gh.log")"
+  assert_contains "$log" "gh repo create tmchow/claude-code --private" "contribute --private still creates a private repository"
+  assert_not_contains "$log" "repo fork" "contribute --private does not create a GitHub fork"
+  assert_eq "https://github.com/tmchow/claude-code.git" "$origin" "contribute --private origin is the private repository"
+  assert_eq "https://github.com/anthropics/claude-code.git" "$upstream" "contribute --private upstream is the original project"
+  teardown
+}
+
+test_group_composes_with_private_path() {
+  setup
+  local output log
+  output="$(run_ext --private --group vendor --print-path anthropics/claude-code)"
+  log="$(cat "$tmpdir/gh.log")"
+  assert_eq "$tmpdir/home/Code/private/anthropics/vendor/claude-code" "$output" "group composes with private upstream path"
+  assert_not_contains "$log" "repo create" "private group print-path does not create a repository"
+  teardown
+}
+
+test_private_path_does_not_collide_with_contribute() {
+  setup
+  local private_path contribute_path
+  private_path="$(run_ext --private --print-path anthropics/claude-code)"
+  contribute_path="$(run_ext --contribute --print-path anthropics/claude-code)"
+  assert_eq "$tmpdir/home/Code/private/anthropics/claude-code" "$private_path" "private uses the private root"
+  assert_eq "$tmpdir/home/Code/oss/anthropics/claude-code" "$contribute_path" "contribute keeps the oss root"
+  teardown
+}
+
+test_private_respects_normal_prefix() {
+  setup
+  local output
+  output="$(GH_SMART_CLONE_PREFIX="$tmpdir/src" run_ext --private --print-path anthropics/claude-code)"
+  assert_eq "$tmpdir/src/private/anthropics/claude-code" "$output" "private mode appends private to resolved normal prefix"
+  teardown
+}
+
+test_private_prefix_flag_overrides_root_and_implies_private_mode() {
+  setup
+  local output
+  output="$(run_ext --private-prefix "$tmpdir/hidden" --print-path anthropics/claude-code)"
+  assert_eq "$tmpdir/hidden/anthropics/claude-code" "$output" "private prefix flag overrides root and implies private mode"
+  teardown
+}
+
+test_private_prefix_env_overrides_git_config() {
+  setup
+  local output
+  git config --file "$tmpdir/gitconfig" smart-clone.privatePrefix "$tmpdir/config-private"
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GH_SMART_CLONE_PRIVATE_PREFIX="$tmpdir/env-private" run_ext --private --print-path anthropics/claude-code)"
+  assert_eq "$tmpdir/env-private/anthropics/claude-code" "$output" "private prefix env overrides git config"
+  teardown
+}
+
+test_private_prefix_git_config_overrides_default() {
+  setup
+  local output
+  git config --file "$tmpdir/gitconfig" smart-clone.privatePrefix "$tmpdir/config-private"
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --private --print-path anthropics/claude-code)"
+  assert_eq "$tmpdir/config-private/anthropics/claude-code" "$output" "private prefix git config overrides default private root"
+  teardown
+}
+
+test_private_prefix_flag_overrides_env_and_config() {
+  setup
+  local output
+  git config --file "$tmpdir/gitconfig" smart-clone.privatePrefix "$tmpdir/config-private"
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GH_SMART_CLONE_PRIVATE_PREFIX="$tmpdir/env-private" run_ext --private-prefix "$tmpdir/flag-private" --print-path anthropics/claude-code)"
+  assert_eq "$tmpdir/flag-private/anthropics/claude-code" "$output" "private prefix flag overrides env and config"
+  teardown
+}
+
+test_private_refuses_oss_flag() {
+  setup
+  local status stderr
+  status="$(run_ext_with_status --private --oss anthropics/claude-code)"
+  stderr="$(cat "$tmpdir/stderr")"
+  assert_eq "1" "$status" "private refuses --oss"
+  assert_contains "$stderr" "--private cannot be used with --oss or --oss-prefix" "private/--oss error is explicit"
+  teardown
+}
+
 tests=(
   test_skill_frontmatter_is_agent_trigger_ready
   test_normal_repo_uses_owner_path
@@ -738,6 +1011,27 @@ tests=(
   test_contribute_errors_when_existing_repo_is_not_a_fork
   test_contribute_org_fork_owner_uses_org_flag
   test_contribute_refuses_upstream_owned_by_fork_owner
+  test_private_print_path_uses_private_upstream_path_without_mutation
+  test_private_dry_run_lists_external_actions_without_mutation
+  test_private_creates_repo_and_clones_upstream_to_private_path
+  test_private_reuses_existing_nonempty_private_repo
+  test_private_reuses_existing_empty_private_repo
+  test_private_sets_identity_and_ssh_alias_when_configured
+  test_private_no_fork_requires_existing_private_repo
+  test_private_existing_destination_requires_reconfigure
+  test_private_reconfigure_updates_existing_checkout
+  test_private_errors_when_existing_repo_is_a_fork
+  test_private_errors_when_existing_repo_is_not_private
+  test_private_org_owner_uses_repo_create
+  test_private_contribute_flag_is_equivalent
+  test_group_composes_with_private_path
+  test_private_path_does_not_collide_with_contribute
+  test_private_respects_normal_prefix
+  test_private_prefix_flag_overrides_root_and_implies_private_mode
+  test_private_prefix_env_overrides_git_config
+  test_private_prefix_git_config_overrides_default
+  test_private_prefix_flag_overrides_env_and_config
+  test_private_refuses_oss_flag
 )
 
 for test_name in "${tests[@]}"; do

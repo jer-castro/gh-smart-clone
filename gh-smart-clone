@@ -19,8 +19,11 @@ EXAMPLES
   gh smart-clone --ssh-alias github.com tmchow/foo
   gh smart-clone --oss --ssh-alias github.com-work tmchow/orca
   gh smart-clone --contribute stablyai/orca
+  gh smart-clone --private stablyai/orca
   gh smart-clone --contribute --ssh-alias github.com stablyai/orca
   gh smart-clone --contribute --reconfigure stablyai/orca
+  gh smart-clone --private --reconfigure stablyai/orca
+  gh smart-clone --private-prefix ~/src/private anthropics/claude-code
   gh smart-clone --oss-prefix ~/src/external anthropics/claude-code
   gh smart-clone --prefix ~/Developer tmchow/orca
   gh smart-clone --fork-placement fork tmchow/orca
@@ -40,16 +43,26 @@ FLAGS
                                   smart-clone.ossPrefix, then <prefix>/oss.
       --contribute                Create/reuse a fork, clone the fork, and place
                                   the checkout under the upstream OSS path.
+      --private                   Create/reuse a private repository instead of a
+                                  GitHub fork. Implies contribution checkout
+                                  setup under the private root: origin=private
+                                  repo, upstream=original.
+      --private-prefix <path>     Private-copy clone root. Implies --private.
+                                  Defaults to GH_SMART_CLONE_PRIVATE_PREFIX,
+                                  then git config smart-clone.privatePrefix,
+                                  then <prefix>/private.
       --fork-owner <owner>        Account or org that should own contribution
-                                  forks. Defaults to smart-clone.forkOwner,
-                                  then the authenticated gh user.
+                                  forks or private copies. Defaults to
+                                  smart-clone.forkOwner, then the authenticated
+                                  gh user.
       --ssh-alias <host>          Rewrite origin to git@<host>:OWNER/REPO.git
-                                  after clone. In --contribute, OWNER is the
-                                  fork owner. Defaults to smart-clone.sshAlias
-                                  when unset.
-      --no-fork                   Do not create a fork. Require it to exist.
-      --reconfigure               Reconfigure an existing contribution checkout
-                                  instead of cloning.
+                                  after clone. In --contribute and --private,
+                                  OWNER is the write-repo owner. Defaults to
+                                  smart-clone.sshAlias when unset.
+      --no-fork                   Do not create a fork or private repository.
+                                  Require it to exist.
+      --reconfigure               Reconfigure an existing contribution or
+                                  private-copy checkout instead of cloning.
       --fork-placement <policy>   Where forks are placed: upstream or fork.
                                   Defaults to upstream.
       --dry-run                   Print what would happen without cloning.
@@ -60,20 +73,30 @@ FLAGS
       --version                   Show version.
 
 NOTES
-  For contribution forks, the directory is based on the upstream repository,
-  but the clone source remains the repository you requested. That keeps:
+  For contribution forks and private copies, the directory is based on the
+  upstream repository, while origin stays the write repository you own. That
+  keeps:
 
-    origin   -> your fork
+    origin   -> your fork or private repository
     upstream -> the original repository
 
   while placing the checkout under the project identity you actually navigate by.
 
-  --contribute is intentionally explicit because fork creation mutates GitHub
-  state. Normal clone mode and --oss never create forks.
+  --contribute and --private are intentionally explicit because they mutate
+  GitHub state. Normal clone mode and --oss never create forks or private
+  copies. GitHub cannot make a private fork of a public repository, so
+  --private creates an independent private repo rather than a fork-network
+  fork. That private repo is not a GitHub fork, so it cannot open a pull
+  request against upstream through the fork PR workflow. Use --contribute
+  when you intend to submit a PR.
 
   --group only inserts a directory segment. It composes with every mode, so
   --group illo tmchow/illo-website lands at <prefix>/tmchow/illo/illo-website,
-  and --oss --group illo ... lands under the oss root the same way.
+  --oss --group illo ... lands under the oss root, and --private --group illo
+  ... lands under the private root the same way.
+
+  --private uses <prefix>/private/<upstream-owner>/<repo> so it does not
+  collide with --oss or --contribute checkouts of the same project.
 HELP_TEXT
 }
 
@@ -137,6 +160,24 @@ default_oss_prefix() {
   printf '%s/oss\n' "$normal_prefix"
 }
 
+default_private_prefix() {
+  local normal_prefix="$1"
+
+  if [[ -n "${GH_SMART_CLONE_PRIVATE_PREFIX:-}" ]]; then
+    expand_tilde "$GH_SMART_CLONE_PRIVATE_PREFIX"
+    return
+  fi
+
+  local configured
+  configured="$(git config --get smart-clone.privatePrefix 2>/dev/null || true)"
+  if [[ -n "$configured" ]]; then
+    expand_tilde "$configured"
+    return
+  fi
+
+  printf '%s/private\n' "$normal_prefix"
+}
+
 git_config_get() {
   git config --get "$1" 2>/dev/null || true
 }
@@ -150,8 +191,8 @@ ssh_origin_url() {
 repo_info() {
   local repo="$1"
   local template
-  template='{{.nameWithOwner}}{{"\t"}}{{.isFork}}{{"\t"}}{{if .parent}}{{.parent.owner.login}}/{{.parent.name}}{{end}}{{"\n"}}'
-  gh repo view "$repo" --json nameWithOwner,isFork,parent --template "$template"
+  template='{{.nameWithOwner}}|{{.isFork}}|{{if .parent}}{{.parent.owner.login}}/{{.parent.name}}{{end}}|{{.isPrivate}}|{{.isEmpty}}{{"\n"}}'
+  gh repo view "$repo" --json nameWithOwner,isFork,parent,isPrivate,isEmpty --template "$template"
 }
 
 remote_set() {
@@ -195,11 +236,12 @@ configure_contribution_checkout() {
 
 existing_checkout_error() {
   local dest="$1"
+  local reconfigure_hint="$2"
   if git -C "$dest" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     printf 'gh-smart-clone: destination already exists: %s\n' "$dest" >&2
     printf 'gh-smart-clone: current remotes:\n' >&2
     git -C "$dest" remote -v >&2 || true
-    die "use --contribute --reconfigure to update remotes/identity intentionally"
+    die "use $reconfigure_hint to update remotes/identity intentionally"
   fi
   die "destination already exists and is not a git repository: $dest"
 }
@@ -233,7 +275,7 @@ validate_existing_fork() {
   local info="$3"
   local resolved_repo is_fork parent_repo
 
-  IFS=$'\t' read -r resolved_repo is_fork parent_repo <<<"$info"
+  IFS='|' read -r resolved_repo is_fork parent_repo _ _ <<<"$info"
   if [[ -z "$resolved_repo" ]]; then
     return 1
   fi
@@ -260,6 +302,39 @@ wait_for_fork() {
   done
 
   die "fork was requested but $fork_repo was not available yet"
+}
+
+validate_existing_private_repo() {
+  local fork_repo="$1"
+  local info="$2"
+  local resolved_repo is_fork parent_repo is_private is_empty
+
+  IFS='|' read -r resolved_repo is_fork parent_repo is_private is_empty <<<"$info"
+  if [[ -z "$resolved_repo" ]]; then
+    return 1
+  fi
+  if [[ "$is_fork" == "true" ]]; then
+    die "$fork_repo exists as a GitHub fork of ${parent_repo:-unknown}; use --contribute to reuse it, or choose a different --fork-owner"
+  fi
+  if [[ "$is_private" != "true" ]]; then
+    die "$fork_repo exists but is not private"
+  fi
+  return 0
+}
+
+wait_for_private_repo() {
+  local fork_repo="$1"
+  local info
+
+  for _ in 1 2 3 4 5; do
+    info="$(fork_info_or_empty "$fork_repo")"
+    if validate_existing_private_repo "$fork_repo" "$info"; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  die "private repository was requested but $fork_repo was not available yet"
 }
 
 ensure_fork() {
@@ -289,12 +364,42 @@ ensure_fork() {
   wait_for_fork "$fork_repo" "$upstream_repo"
 }
 
+ensure_private_repo() {
+  local upstream_repo="$1"
+  local fork_repo="$2"
+  local no_fork="$3"
+  local info resolved_repo is_fork parent_repo is_private is_empty
+
+  info="$(fork_info_or_empty "$fork_repo")"
+  if validate_existing_private_repo "$fork_repo" "$info"; then
+    IFS='|' read -r resolved_repo is_fork parent_repo is_private is_empty <<<"$info"
+    printf 'Using existing private repository %s\n' "$fork_repo"
+    if [[ "$is_empty" == "true" ]]; then
+      write_clone_source="$upstream_repo"
+    else
+      write_clone_source="$fork_repo"
+    fi
+    return
+  fi
+
+  if [[ "$no_fork" == true ]]; then
+    die "required private repository does not exist: $fork_repo"
+  fi
+
+  gh repo create "$fork_repo" --private --description "Private copy of $upstream_repo"
+  wait_for_private_repo "$fork_repo"
+  write_clone_source="$upstream_repo"
+}
+
 prefix=""
 group=""
 group_provided=false
 oss_prefix=""
 oss_mode=false
+oss_requested=false
+private_prefix=""
 contribute=false
+private_copy=false
 fork_owner=""
 ssh_alias=""
 no_fork=false
@@ -302,6 +407,7 @@ reconfigure=false
 fork_placement="upstream"
 dry_run=false
 print_path=false
+write_clone_source=""
 repo_arg=""
 clone_flags=()
 git_clone_flags=()
@@ -336,20 +442,39 @@ while (($#)); do
       ;;
     --oss|--external)
       oss_mode=true
+      oss_requested=true
       ;;
     --oss-prefix)
       shift
       [[ $# -gt 0 ]] || die "--oss-prefix requires a path"
       oss_prefix="$1"
       oss_mode=true
+      oss_requested=true
       ;;
     --oss-prefix=*)
       oss_prefix="${1#--oss-prefix=}"
       oss_mode=true
+      oss_requested=true
       ;;
     --contribute)
       contribute=true
       oss_mode=true
+      ;;
+    --private)
+      private_copy=true
+      contribute=true
+      ;;
+    --private-prefix)
+      shift
+      [[ $# -gt 0 ]] || die "--private-prefix requires a path"
+      private_prefix="$1"
+      private_copy=true
+      contribute=true
+      ;;
+    --private-prefix=*)
+      private_prefix="${1#--private-prefix=}"
+      private_copy=true
+      contribute=true
       ;;
     --fork-owner)
       shift
@@ -428,13 +553,17 @@ case "$fork_placement" in
 esac
 
 if [[ "$contribute" != true ]]; then
-  [[ -z "$fork_owner" ]] || die "--fork-owner can only be used with --contribute"
-  [[ "$no_fork" == false ]] || die "--no-fork can only be used with --contribute"
-  [[ "$reconfigure" == false ]] || die "--reconfigure can only be used with --contribute"
+  [[ -z "$fork_owner" ]] || die "--fork-owner can only be used with --contribute or --private"
+  [[ "$no_fork" == false ]] || die "--no-fork can only be used with --contribute or --private"
+  [[ "$reconfigure" == false ]] || die "--reconfigure can only be used with --contribute or --private"
 fi
 
 if [[ "$contribute" == true && ${#clone_flags[@]} -gt 0 ]]; then
-  die "--no-upstream and --upstream-remote-name are not supported with --contribute"
+  die "--no-upstream and --upstream-remote-name are not supported with --contribute or --private"
+fi
+
+if [[ "$private_copy" == true && "$oss_requested" == true ]]; then
+  die "--private cannot be used with --oss or --oss-prefix"
 fi
 
 if ! command -v gh >/dev/null 2>&1; then
@@ -442,13 +571,15 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 prefix="$(expand_tilde "${prefix:-$(default_prefix)}")"
-if [[ "$oss_mode" == true ]]; then
+if [[ "$private_copy" == true ]]; then
+  prefix="$(expand_tilde "${private_prefix:-$(default_private_prefix "$prefix")}")"
+elif [[ "$oss_mode" == true ]]; then
   prefix="$(expand_tilde "${oss_prefix:-$(default_oss_prefix "$prefix")}")"
 fi
 
 repo_info="$(repo_info "$repo_arg")"
 
-IFS=$'\t' read -r requested_repo is_fork parent_repo <<<"$repo_info"
+IFS='|' read -r requested_repo is_fork parent_repo _ _ <<<"$repo_info"
 
 [[ -n "$requested_repo" ]] || die "could not resolve repository: $repo_arg"
 
@@ -491,27 +622,48 @@ if [[ "$contribute" == true ]]; then
   origin_url="https://github.com/$fork_repo.git"
   git_name="$(git_config_get smart-clone.gitName)"
   git_email="$(git_config_get smart-clone.gitEmail)"
+  write_clone_source="$fork_repo"
+  reconfigure_hint="--contribute --reconfigure"
+  if [[ "$private_copy" == true ]]; then
+    reconfigure_hint="--private --reconfigure"
+  fi
 
   if [[ -n "$ssh_alias" ]]; then
     origin_url="$(ssh_origin_url "$ssh_alias" "$fork_repo")"
   fi
 
   if [[ "$dry_run" == true ]]; then
-    printf 'mode: contribute\n'
+    if [[ "$private_copy" == true ]]; then
+      printf 'mode: private\n'
+    else
+      printf 'mode: contribute\n'
+    fi
     printf 'upstream: %s\n' "$canonical_repo"
     printf 'fork-owner: %s\n' "$fork_owner"
-    printf 'fork: %s\n' "$fork_repo"
+    if [[ "$private_copy" == true ]]; then
+      printf 'private-repo: %s\n' "$fork_repo"
+    else
+      printf 'fork: %s\n' "$fork_repo"
+    fi
     if [[ -n "$group" ]]; then
       printf 'group: %s\n' "$group"
     fi
     printf 'destination: %s\n' "$destination"
-    if [[ "$no_fork" == true ]]; then
+    if [[ "$private_copy" == true ]]; then
+      if [[ "$no_fork" == true ]]; then
+        printf 'action: require existing private repository %s\n' "$fork_repo"
+      else
+        printf 'action: ensure private repository %s from %s\n' "$fork_repo" "$canonical_repo"
+      fi
+    elif [[ "$no_fork" == true ]]; then
       printf 'action: require existing fork %s\n' "$fork_repo"
     else
       printf 'action: ensure fork %s from %s\n' "$fork_repo" "$canonical_repo"
     fi
     if [[ "$reconfigure" == true ]]; then
       printf 'action: reconfigure existing checkout\n'
+    elif [[ "$private_copy" == true ]]; then
+      printf 'action: clone %s to %s with origin=%s\n' "$canonical_repo" "$destination" "$fork_repo"
     else
       printf 'action: clone %s to %s\n' "$fork_repo" "$destination"
     fi
@@ -523,37 +675,52 @@ if [[ "$contribute" == true ]]; then
     if [[ -n "$git_email" ]]; then
       printf 'git user.email: %s\n' "$git_email"
     fi
-    if [[ "$fork_owner" != "$auth_login" ]]; then
+    if [[ "$private_copy" == true && "$fork_owner" != "$auth_login" ]]; then
+      printf 'private-target: %s via gh repo create\n' "$fork_repo"
+    elif [[ "$private_copy" != true && "$fork_owner" != "$auth_login" ]]; then
       printf 'fork-target: organization %s via gh repo fork --org\n' "$fork_owner"
     fi
     exit 0
   fi
 
   if [[ -e "$destination" && "$reconfigure" != true ]]; then
-    existing_checkout_error "$destination"
+    existing_checkout_error "$destination" "$reconfigure_hint"
   fi
   if [[ ! -e "$destination" && "$reconfigure" == true ]]; then
     die "--reconfigure requires an existing checkout: $destination"
   fi
 
-  ensure_fork "$canonical_repo" "$fork_owner" "$fork_repo" "$auth_login" "$no_fork"
+  if [[ "$private_copy" == true ]]; then
+    ensure_private_repo "$canonical_repo" "$fork_repo" "$no_fork"
+  else
+    ensure_fork "$canonical_repo" "$fork_owner" "$fork_repo" "$auth_login" "$no_fork"
+  fi
 
   if [[ "$reconfigure" == true ]]; then
     configure_contribution_checkout "$destination" "$fork_repo" "$canonical_repo" "$origin_url" "$git_name" "$git_email"
-    printf 'Reconfigured %s for contribution to %s\n' "$destination" "$canonical_repo"
+    if [[ "$private_copy" == true ]]; then
+      printf 'Reconfigured %s as a private copy of %s\n' "$destination" "$canonical_repo"
+    else
+      printf 'Reconfigured %s for contribution to %s\n' "$destination" "$canonical_repo"
+    fi
     exit 0
   fi
 
   mkdir -p "$(dirname "$destination")"
-  cmd=(gh repo clone "$fork_repo" "$destination")
+  cmd=(gh repo clone "$write_clone_source" "$destination")
   if ((${#git_clone_flags[@]})); then
     cmd+=(-- "${git_clone_flags[@]}")
   fi
 
   "${cmd[@]}"
   configure_contribution_checkout "$destination" "$fork_repo" "$canonical_repo" "$origin_url" "$git_name" "$git_email"
-  printf 'Cloned fork %s to %s\n' "$fork_repo" "$destination"
-  printf 'Configured upstream for %s\n' "$canonical_repo"
+  if [[ "$private_copy" == true ]]; then
+    printf 'Cloned %s to %s\n' "$write_clone_source" "$destination"
+    printf 'Configured origin %s and upstream %s\n' "$fork_repo" "$canonical_repo"
+  else
+    printf 'Cloned fork %s to %s\n' "$fork_repo" "$destination"
+    printf 'Configured upstream for %s\n' "$canonical_repo"
+  fi
   exit 0
 fi
 

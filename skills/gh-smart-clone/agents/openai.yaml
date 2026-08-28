@@ -1,4 +1,4 @@
 interface:
   display_name: "gh-smart-clone"
   short_description: "Clone GitHub repos with gh smart-clone."
-  default_prompt: "Clone the GitHub repo with gh smart-clone. Choose normal, --oss, or --contribute, then verify path, remotes, and local git identity."
+  default_prompt: "Clone the GitHub repo with gh smart-clone. Choose normal, --oss, --contribute, or --private, then verify path, remotes, and local git identity."
