@@ -96,7 +96,10 @@ NOTES
   ... lands under the private root the same way.
 
   --private uses <prefix>/private/<upstream-owner>/<repo> so it does not
-  collide with --oss or --contribute checkouts of the same project.
+  collide with --oss or --contribute checkouts of the same project. Both
+  --contribute and --private still want the same GitHub name,
+  <fork-owner>/<repo>. To keep both, rename the private copy; a GitHub
+  rename redirect is not treated as occupying that name.
 HELP_TEXT
 }
 
@@ -195,6 +198,13 @@ repo_info() {
   gh repo view "$repo" --json nameWithOwner,isFork,parent,isPrivate,isEmpty --template "$template"
 }
 
+same_github_repo() {
+  local left right
+  left="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  right="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+  [[ "$left" == "$right" ]]
+}
+
 remote_set() {
   local dest="$1"
   local name="$2"
@@ -276,11 +286,11 @@ validate_existing_fork() {
   local resolved_repo is_fork parent_repo
 
   IFS='|' read -r resolved_repo is_fork parent_repo _ _ <<<"$info"
-  if [[ -z "$resolved_repo" ]]; then
+  if [[ -z "$resolved_repo" ]] || ! same_github_repo "$resolved_repo" "$fork_repo"; then
     return 1
   fi
   if [[ "$is_fork" != "true" ]]; then
-    die "$fork_repo exists but is not a fork"
+    die "$fork_repo exists but is not a fork. Rename that repository on GitHub or pass a different --fork-owner"
   fi
   if [[ "$parent_repo" != "$upstream_repo" ]]; then
     die "$fork_repo is a fork of $parent_repo, not $upstream_repo"
@@ -310,7 +320,7 @@ validate_existing_private_repo() {
   local resolved_repo is_fork parent_repo is_private is_empty
 
   IFS='|' read -r resolved_repo is_fork parent_repo is_private is_empty <<<"$info"
-  if [[ -z "$resolved_repo" ]]; then
+  if [[ -z "$resolved_repo" ]] || ! same_github_repo "$resolved_repo" "$fork_repo"; then
     return 1
   fi
   if [[ "$is_fork" == "true" ]]; then

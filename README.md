@@ -381,7 +381,10 @@ or `GH_SMART_CLONE_PRIVATE_PREFIX`. `--private-prefix` implies `--private`.
 
 The private repository is not in GitHub's fork network, so it cannot open a
 pull request against upstream through the fork PR workflow. Use `--contribute`
-when you intend to submit a PR.
+when you intend to submit a PR. `--contribute` and `--private` both use
+`<fork-owner>/<repo>` as the GitHub write name. To keep both, rename the
+private copy on GitHub first; a leftover rename redirect is ignored, so
+`--contribute` can still create the fork at the original name.
 
 If the private repo is new or empty, `gh-smart-clone` clones the upstream
 project and points `origin` at the private repo. If the private repo already

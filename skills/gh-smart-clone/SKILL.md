@@ -181,6 +181,9 @@ Confirm these facts:
 - Using `--private` when the user actually intends to submit a GitHub PR; use `--contribute` instead.
 - Creating forks or private copies during inspection tasks. Those mutations belong only to `--contribute` and `--private`.
 - Reusing a public repo or GitHub fork as a `--private` write target.
+- Using the same GitHub name for a private copy and a contribution fork.
+  `--contribute` and `--private` both want `<fork-owner>/<repo>`. Rename the
+  private copy first; leftover GitHub rename redirects are ignored.
 - Pushing with the wrong GitHub account or SSH alias.
 - Mutating an existing checkout's remotes without explicit reconfiguration intent.
 - Reusing a fork whose parent is not the requested upstream project.

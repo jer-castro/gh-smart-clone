@@ -41,6 +41,8 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
         printf 'tmchow/claude-code|true|other/claude-code|false|false\n'
       elif [[ "${GH_FAKE_NONFORK:-}" == "1" ]]; then
         printf 'tmchow/claude-code|false||false|false\n'
+      elif [[ "${GH_FAKE_REDIRECT:-}" == "1" && "${GH_FAKE_FORK_EXISTS:-}" != "1" && "$(cat "${GH_FAKE_STATE:-/dev/null}" 2>/dev/null || true)" != "fork" ]]; then
+        printf 'tmchow/claude-code-private|false||true|false\n'
       elif [[ "${GH_FAKE_PRIVATE_EXISTS:-}" == "1" ]]; then
         if [[ "${GH_FAKE_PRIVATE_EMPTY:-}" == "1" ]]; then
           printf 'tmchow/claude-code|false||true|true\n'
@@ -686,6 +688,18 @@ test_contribute_errors_when_existing_repo_is_not_a_fork() {
   teardown
 }
 
+test_contribute_ignores_rename_redirect_and_creates_fork() {
+  setup
+  local dest log origin
+  dest="$tmpdir/home/Code/oss/anthropics/claude-code"
+  GH_FAKE_REDIRECT=1 run_ext --contribute anthropics/claude-code >/dev/null
+  log="$(cat "$tmpdir/gh.log")"
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_contains "$log" "gh repo fork anthropics/claude-code --default-branch-only --clone=false" "contribute creates a fork after a rename redirect"
+  assert_eq "https://github.com/tmchow/claude-code.git" "$origin" "contribute origin is the new fork, not the renamed private copy"
+  teardown
+}
+
 test_contribute_org_fork_owner_uses_org_flag() {
   setup
   local log dest origin
@@ -1009,6 +1023,7 @@ tests=(
   test_contribute_reconfigure_updates_existing_checkout
   test_contribute_errors_when_existing_fork_has_wrong_parent
   test_contribute_errors_when_existing_repo_is_not_a_fork
+  test_contribute_ignores_rename_redirect_and_creates_fork
   test_contribute_org_fork_owner_uses_org_flag
   test_contribute_refuses_upstream_owned_by_fork_owner
   test_private_print_path_uses_private_upstream_path_without_mutation

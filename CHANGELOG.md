@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Ignore GitHub rename redirects when checking the write-repo name, so a
+  renamed `--private` copy no longer blocks `--contribute` from creating a
+  fork at `<fork-owner>/<repo>`.
 - Add `--private` to create or reuse an independent private repository with
   contribution-style remotes: `origin` is the private repo, `upstream` is the
   original project. Checkouts land under `<prefix>/private/<upstream-owner>/<repo>`
