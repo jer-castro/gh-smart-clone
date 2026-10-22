@@ -10,6 +10,11 @@ failures=0
 setup() {
   tmpdir="$(mktemp -d)"
   mkdir -p "$tmpdir/bin" "$tmpdir/home"
+  : >"$tmpdir/gitconfig"
+  # Hide the developer gitconfig. url.insteadOf rewrites make
+  # `git remote get-url` disagree with the URL this tool stored.
+  export GIT_CONFIG_GLOBAL="$tmpdir/gitconfig"
+  export GIT_CONFIG_NOSYSTEM=1
 
   cat >"$tmpdir/bin/gh" <<'FAKE_GH'
 #!/usr/bin/env bash
@@ -113,7 +118,11 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "clone" ]]; then
   printf '\n'
   mkdir -p "$destination"
   git -C "$destination" init -q
-  git -C "$destination" remote add origin "https://github.com/$source_repo.git"
+  if [[ "${GH_FAKE_GIT_PROTOCOL:-https}" == "ssh" ]]; then
+    git -C "$destination" remote add origin "git@github.com:${source_repo}.git"
+  else
+    git -C "$destination" remote add origin "https://github.com/$source_repo.git"
+  fi
   exit 0
 fi
 
@@ -132,6 +141,7 @@ FAKE_GH
 }
 
 teardown() {
+  unset GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
   if [[ -n "$tmpdir" && -d "$tmpdir" ]]; then
     rm -rf "$tmpdir"
   fi
@@ -209,6 +219,7 @@ test_skill_frontmatter_is_agent_trigger_ready() {
   assert_contains "$body" "External OSS Contribution" "skill body explains contribution scenario"
   assert_contains "$body" "Private Working Copy" "skill body explains private-copy scenario"
   assert_contains "$description" "private" "skill description mentions private copies"
+  assert_contains "$body" "--https" "skill body documents --https"
 }
 
 test_normal_repo_uses_owner_path() {
@@ -620,6 +631,116 @@ test_ssh_alias_rejects_empty_value() {
   teardown
 }
 
+test_https_overrides_configured_ssh_alias() {
+  setup
+  local dest origin upstream
+  git config --file "$tmpdir/gitconfig" smart-clone.sshAlias github.com-work
+  git config --file "$tmpdir/gitconfig" smart-clone.forkOwner tmchow
+
+  dest="$tmpdir/home/Code/tmchow/foo"
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --https tmchow/foo >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_eq "https://github.com/tmchow/foo.git" "$origin" "normal --https ignores configured ssh alias"
+
+  dest="$tmpdir/home/Code/oss/stablyai/orca"
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --oss --https tmchow/orca >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_eq "https://github.com/tmchow/orca.git" "$origin" "oss --https ignores configured ssh alias"
+
+  dest="$tmpdir/home/Code/oss/anthropics/claude-code"
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --contribute --https anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  upstream="$(git -C "$dest" remote get-url upstream)"
+  assert_eq "https://github.com/tmchow/claude-code.git" "$origin" "contribute --https ignores configured ssh alias"
+  assert_eq "https://github.com/anthropics/claude-code.git" "$upstream" "contribute --https keeps upstream on HTTPS"
+
+  rm -f "$tmpdir/state"
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --private --https anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  upstream="$(git -C "$dest" remote get-url upstream)"
+  assert_eq "https://github.com/tmchow/claude-code.git" "$origin" "private --https ignores configured ssh alias"
+  assert_eq "https://github.com/anthropics/claude-code.git" "$upstream" "private --https keeps upstream on HTTPS"
+  teardown
+}
+
+test_https_dry_run_prints_https_origin() {
+  setup
+  local output log
+  git config --file "$tmpdir/gitconfig" smart-clone.sshAlias github.com-work
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --https --dry-run tmchow/foo)"
+  assert_contains "$output" "origin: https://github.com/tmchow/foo.git" "normal --https dry-run shows HTTPS origin"
+  assert_not_contains "$output" "git@github.com-work:tmchow/foo.git" "normal --https dry-run ignores configured ssh alias"
+
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --oss --https --dry-run tmchow/orca)"
+  assert_contains "$output" "origin: https://github.com/tmchow/orca.git" "oss --https dry-run shows HTTPS origin for the requested repo"
+  assert_not_contains "$output" "git@" "oss --https dry-run does not print an SSH remote"
+
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --contribute --https --dry-run anthropics/claude-code)"
+  assert_contains "$output" "origin: https://github.com/tmchow/claude-code.git" "contribute --https dry-run shows HTTPS origin"
+  assert_contains "$output" "upstream-remote: https://github.com/anthropics/claude-code.git" "contribute --https dry-run shows HTTPS upstream"
+  assert_not_contains "$output" "git@" "contribute --https dry-run does not print an SSH remote"
+
+  output="$(GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" run_ext --private --https --dry-run anthropics/claude-code)"
+  assert_contains "$output" "origin: https://github.com/tmchow/claude-code.git" "private --https dry-run shows HTTPS origin"
+  assert_contains "$output" "upstream-remote: https://github.com/anthropics/claude-code.git" "private --https dry-run shows HTTPS upstream"
+  assert_not_contains "$output" "git@" "private --https dry-run does not print an SSH remote"
+
+  log="$(cat "$tmpdir/gh.log")"
+  assert_not_contains "$log" "repo clone" "--https dry-run does not clone"
+  assert_not_contains "$log" "repo fork" "--https dry-run does not create a fork"
+  assert_not_contains "$log" "repo create" "--https dry-run does not create a private repository"
+  teardown
+}
+
+test_https_forces_https_when_gh_git_protocol_is_ssh() {
+  setup
+  local dest origin upstream
+  dest="$tmpdir/home/Code/tmchow/foo"
+  GH_FAKE_GIT_PROTOCOL=ssh run_ext --https tmchow/foo >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_eq "https://github.com/tmchow/foo.git" "$origin" "normal --https rewrites origin when gh git_protocol is ssh"
+
+  dest="$tmpdir/home/Code/EveryInc/compound-engineering-plugin"
+  GH_FAKE_GIT_PROTOCOL=ssh run_ext EveryInc/compound-engineering-plugin >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_eq "git@github.com:EveryInc/compound-engineering-plugin.git" "$origin" "normal clone keeps gh git_protocol ssh without --https"
+
+  git config --file "$tmpdir/gitconfig" smart-clone.sshAlias github.com-work
+  dest="$tmpdir/home/Code/oss/stablyai/orca"
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GH_FAKE_GIT_PROTOCOL=ssh run_ext --oss --https tmchow/orca >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  assert_eq "https://github.com/tmchow/orca.git" "$origin" "oss --https rewrites origin when gh git_protocol is ssh and an alias is configured"
+
+  dest="$tmpdir/home/Code/oss/anthropics/claude-code"
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GH_FAKE_GIT_PROTOCOL=ssh run_ext --contribute --https anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  upstream="$(git -C "$dest" remote get-url upstream)"
+  assert_eq "https://github.com/tmchow/claude-code.git" "$origin" "contribute --https rewrites origin when gh git_protocol is ssh"
+  assert_eq "https://github.com/anthropics/claude-code.git" "$upstream" "contribute --https keeps upstream HTTPS when gh git_protocol is ssh"
+
+  rm -f "$tmpdir/state"
+  dest="$tmpdir/home/Code/private/anthropics/claude-code"
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GH_FAKE_GIT_PROTOCOL=ssh run_ext --private --https anthropics/claude-code >/dev/null
+  origin="$(git -C "$dest" remote get-url origin)"
+  upstream="$(git -C "$dest" remote get-url upstream)"
+  assert_eq "https://github.com/tmchow/claude-code.git" "$origin" "private --https rewrites origin when gh git_protocol is ssh"
+  assert_eq "https://github.com/anthropics/claude-code.git" "$upstream" "private --https keeps upstream HTTPS when gh git_protocol is ssh"
+  teardown
+}
+
+test_https_rejects_ssh_alias_flag() {
+  setup
+  local status stderr log
+  status="$(run_ext_with_status --https --ssh-alias github.com tmchow/foo)"
+  stderr="$(cat "$tmpdir/stderr")"
+  log="$(cat "$tmpdir/gh.log" 2>/dev/null || true)"
+  assert_eq "1" "$status" "--https with --ssh-alias fails"
+  assert_contains "$stderr" "gh-smart-clone: --https cannot be used with --ssh-alias" "--https/--ssh-alias error is explicit"
+  assert_not_contains "$log" "repo clone" "--https with --ssh-alias does not clone"
+  teardown
+}
+
 test_contribute_no_fork_requires_existing_fork() {
   setup
   local status stderr
@@ -1018,6 +1139,10 @@ tests=(
   test_normal_ssh_alias_flag_overrides_config
   test_normal_ssh_alias_flag_dry_run
   test_ssh_alias_rejects_empty_value
+  test_https_overrides_configured_ssh_alias
+  test_https_dry_run_prints_https_origin
+  test_https_forces_https_when_gh_git_protocol_is_ssh
+  test_https_rejects_ssh_alias_flag
   test_contribute_no_fork_requires_existing_fork
   test_contribute_existing_destination_requires_reconfigure
   test_contribute_reconfigure_updates_existing_checkout

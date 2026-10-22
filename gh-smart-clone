@@ -17,6 +17,7 @@ EXAMPLES
   gh smart-clone --oss tmchow/orca
   gh smart-clone --group illo tmchow/illo-website
   gh smart-clone --ssh-alias github.com tmchow/foo
+  gh smart-clone --https tmchow/foo
   gh smart-clone --oss --ssh-alias github.com-work tmchow/orca
   gh smart-clone --contribute stablyai/orca
   gh smart-clone --private stablyai/orca
@@ -59,6 +60,12 @@ FLAGS
                                   after clone. In --contribute and --private,
                                   OWNER is the write-repo owner. Defaults to
                                   smart-clone.sshAlias when unset.
+      --https                     Force HTTPS remotes for this run. Sets origin
+                                  to https://github.com/OWNER/REPO.git after
+                                  clone, ignoring smart-clone.sshAlias and gh
+                                  git_protocol. In --contribute and --private,
+                                  origin and upstream are both HTTPS. Cannot
+                                  be combined with --ssh-alias.
       --no-fork                   Do not create a fork or private repository.
                                   Require it to exist.
       --reconfigure               Reconfigure an existing contribution or
@@ -100,6 +107,10 @@ NOTES
   --contribute and --private still want the same GitHub name,
   <fork-owner>/<repo>. To keep both, rename the private copy; a GitHub
   rename redirect is not treated as occupying that name.
+
+  --https is a one-run override. It ignores smart-clone.sshAlias and rewrites
+  remote URLs after clone, so a gh git_protocol of ssh does not decide the
+  stored URL. Combining it with --ssh-alias is an error.
 HELP_TEXT
 }
 
@@ -191,6 +202,11 @@ ssh_origin_url() {
   printf 'git@%s:%s.git\n' "$host" "$repo"
 }
 
+https_repo_url() {
+  local repo="$1"
+  printf 'https://github.com/%s.git\n' "$repo"
+}
+
 repo_info() {
   local repo="$1"
   local template
@@ -234,7 +250,7 @@ configure_contribution_checkout() {
 
   ensure_git_repo "$dest"
   remote_set "$dest" origin "$origin_url"
-  remote_set "$dest" upstream "https://github.com/$upstream_repo.git"
+  remote_set "$dest" upstream "$(https_repo_url "$upstream_repo")"
 
   if [[ -n "$git_name" ]]; then
     git -C "$dest" config user.name "$git_name"
@@ -412,6 +428,8 @@ contribute=false
 private_copy=false
 fork_owner=""
 ssh_alias=""
+ssh_alias_set=false
+force_https=false
 no_fork=false
 reconfigure=false
 fork_placement="upstream"
@@ -499,10 +517,15 @@ while (($#)); do
       [[ $# -gt 0 ]] || die "--ssh-alias requires a host"
       [[ -n "$1" ]] || die "--ssh-alias requires a non-empty host"
       ssh_alias="$1"
+      ssh_alias_set=true
       ;;
     --ssh-alias=*)
       ssh_alias="${1#--ssh-alias=}"
       [[ -n "$ssh_alias" ]] || die "--ssh-alias requires a non-empty host"
+      ssh_alias_set=true
+      ;;
+    --https)
+      force_https=true
       ;;
     --no-fork)
       no_fork=true
@@ -576,6 +599,10 @@ if [[ "$private_copy" == true && "$oss_requested" == true ]]; then
   die "--private cannot be used with --oss or --oss-prefix"
 fi
 
+if [[ "$force_https" == true && "$ssh_alias_set" == true ]]; then
+  die "--https cannot be used with --ssh-alias"
+fi
+
 if ! command -v gh >/dev/null 2>&1; then
   die "GitHub CLI 'gh' is required"
 fi
@@ -617,7 +644,10 @@ if [[ "$print_path" == true ]]; then
   exit 0
 fi
 
-ssh_alias="${ssh_alias:-$(git_config_get smart-clone.sshAlias)}"
+# --https is a per-run override. Do not fall back to smart-clone.sshAlias.
+if [[ "$force_https" != true ]]; then
+  ssh_alias="${ssh_alias:-$(git_config_get smart-clone.sshAlias)}"
+fi
 
 if [[ "$contribute" == true ]]; then
   fork_owner="$(resolve_fork_owner "$fork_owner")"
@@ -629,7 +659,7 @@ if [[ "$contribute" == true ]]; then
 
   auth_login="$(gh api user --jq .login)"
   fork_repo="$fork_owner/$name"
-  origin_url="https://github.com/$fork_repo.git"
+  origin_url="$(https_repo_url "$fork_repo")"
   git_name="$(git_config_get smart-clone.gitName)"
   git_email="$(git_config_get smart-clone.gitEmail)"
   write_clone_source="$fork_repo"
@@ -678,7 +708,7 @@ if [[ "$contribute" == true ]]; then
       printf 'action: clone %s to %s\n' "$fork_repo" "$destination"
     fi
     printf 'origin: %s\n' "$origin_url"
-    printf 'upstream-remote: https://github.com/%s.git\n' "$canonical_repo"
+    printf 'upstream-remote: %s\n' "$(https_repo_url "$canonical_repo")"
     if [[ -n "$git_name" ]]; then
       printf 'git user.name: %s\n' "$git_name"
     fi
@@ -752,6 +782,8 @@ if [[ "$dry_run" == true ]]; then
   printf '\n'
   if [[ -n "$ssh_alias" ]]; then
     printf 'origin: %s\n' "$(ssh_origin_url "$ssh_alias" "$requested_repo")"
+  elif [[ "$force_https" == true ]]; then
+    printf 'origin: %s\n' "$(https_repo_url "$requested_repo")"
   fi
   exit 0
 fi
@@ -769,6 +801,8 @@ fi
 "${cmd[@]}"
 if [[ -n "$ssh_alias" ]]; then
   remote_set "$destination" origin "$(ssh_origin_url "$ssh_alias" "$requested_repo")"
+elif [[ "$force_https" == true ]]; then
+  remote_set "$destination" origin "$(https_repo_url "$requested_repo")"
 fi
 printf 'Cloned %s to %s\n' "$requested_repo" "$destination"
 if [[ "$canonical_repo" != "$requested_repo" ]]; then

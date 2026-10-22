@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `--https` to force HTTPS remotes for one run. It ignores
+  `smart-clone.sshAlias` and rewrites `origin` after clone, including when
+  `gh` `git_protocol` is ssh. Normal, `--oss`, `--contribute`, and `--private`
+  all honor it, and `--dry-run` prints the HTTPS URLs. In `--contribute` and
+  `--private`, `upstream` stays HTTPS too. Combining `--https` with
+  `--ssh-alias` is an error.
 - Ignore GitHub rename redirects when checking the write-repo name, so a
   renamed `--private` copy no longer blocks `--contribute` from creating a
   fork at `<fork-owner>/<repo>`.

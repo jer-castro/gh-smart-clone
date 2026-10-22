@@ -1,6 +1,6 @@
 ---
 name: gh-smart-clone
-description: Clone GitHub repos with gh smart-clone. Use when cloning, git clone, gh repo clone, forking, contributing, inspecting OSS, remotes, local git identity, grouping related repos, or creating a private copy of an external repo.
+description: Clone GitHub repos with gh smart-clone. Use when cloning, git clone, gh repo clone, forking, contributing, inspecting OSS, HTTPS or SSH remotes, local git identity, grouping related repos, or creating a private copy of an external repo.
 ---
 
 # gh-smart-clone
@@ -154,6 +154,8 @@ Use `--fork-owner OWNER_OR_ORG` for one-off contribution or private-copy workflo
 
 Use `--ssh-alias <host>` when `origin` should be SSH without relying on git config, for example `--ssh-alias github.com` or a Host alias like `--ssh-alias github.com-work`. It works in normal, `--oss`, `--contribute`, and `--private` modes. The flag overrides `smart-clone.sshAlias` when both are set.
 
+Use `--https` when this run should use HTTPS remotes even though `smart-clone.sshAlias` is set, or when `gh` is configured to clone over SSH. It forces `origin` to `https://github.com/OWNER/REPO.git` after clone in normal, `--oss`, `--contribute`, and `--private` modes, so the stored URL does not follow `gh` `git_protocol`. In `--contribute` and `--private`, `upstream` is HTTPS too. The flag is per run and does not change git config. Do not pass `--https` together with `--ssh-alias`.
+
 ## Verification
 
 After contribution setup and before editing or pushing, verify:
@@ -185,5 +187,6 @@ Confirm these facts:
   `--contribute` and `--private` both want `<fork-owner>/<repo>`. Rename the
   private copy first; leftover GitHub rename redirects are ignored.
 - Pushing with the wrong GitHub account or SSH alias.
+- Leaving `smart-clone.sshAlias` or an SSH `git_protocol` in place when the user asked for HTTPS. Pass `--https` for that run.
 - Mutating an existing checkout's remotes without explicit reconfiguration intent.
 - Reusing a fork whose parent is not the requested upstream project.
