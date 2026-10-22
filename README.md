@@ -333,6 +333,24 @@ rewrites the fork remote. Use plain `github.com` for default SSH, or an SSH
 config Host alias. The flag overrides `smart-clone.sshAlias` when both are set.
 In `--contribute` and `--private`, `upstream` remains HTTPS.
 
+Force HTTPS for one run, even when `smart-clone.sshAlias` is set or `gh` is
+configured with `git_protocol: ssh`:
+
+```sh
+gh smart-clone --https YOUR_USERNAME/notes
+gh smart-clone --oss --https acme/widgets
+gh smart-clone --contribute --https contoso/cli
+gh smart-clone --private --https contoso/cli
+gh smart-clone --https --dry-run contoso/cli
+```
+
+`--https` sets `origin` to `https://github.com/OWNER/REPO.git` after clone in
+every mode, so the stored URL does not follow `gh` config. Normal and `--oss`
+use the requested repository. `--contribute` and `--private` use the write
+repository for `origin` and keep `upstream` on HTTPS. The flag ignores
+`smart-clone.sshAlias`. Combining `--https` with `--ssh-alias` is an error.
+`--dry-run` prints the HTTPS URLs and does not clone.
+
 If the fork owner differs from the authenticated `gh` user, `--contribute`
 treats it as an organization fork target and passes `--org OWNER_OR_ORG` to
 `gh repo fork`. `--private` creates `OWNER_OR_ORG/REPO` with `gh repo create`.
@@ -454,6 +472,12 @@ gh smart-clone YOUR_USERNAME/widgets -- --depth=1
                                 after clone. In --contribute and --private,
                                 OWNER is the write-repo owner. Defaults to
                                 smart-clone.sshAlias when unset.
+    --https                     Force HTTPS remotes for this run. Sets origin
+                                to https://github.com/OWNER/REPO.git after
+                                clone, ignoring smart-clone.sshAlias and gh
+                                git_protocol. In --contribute and --private,
+                                origin and upstream are both HTTPS. Cannot
+                                be combined with --ssh-alias.
     --no-fork                   Do not create a fork or private repository.
                                 Require it to exist.
     --reconfigure               Reconfigure an existing contribution or
